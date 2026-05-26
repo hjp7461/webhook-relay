@@ -222,7 +222,11 @@ SIGTERM ──► handleSignal()
   링크로컬). 동적 DNS 우회 차단. 데모 기본(`true`)에서는 스킵.
 - ❌ **Bearer timing-safe 비교** — 현재 `===`. 운영 노출 전 `crypto.timingSafeEqual` 권장.
 - ❌ **DLQ 자동 재투입** — Q-DLQ-1 (a). 격리만.
-- ❌ **stalled-limit 초과 시 DLQ 이동** — `failed(job===undefined)` 케이스는 현재 silent return → 페이로드 손실 가능성. 후속 결정 + 정책 필요.
+- ✅ **stalled-limit 초과 시 DLQ 이동 (best-effort recovery)** — `failed(job===undefined)`
+  케이스는 워커 프로세스 내부의 in-memory `activeJobs` 추적을 통해 후보를 식별하고
+  보수적으로 `stalled-loss-recovered` 메시지로 DLQ 에 적재한다. 분류는 Retriable.
+  concurrency>1 의 ambiguous 케이스에서는 중복 적재(< 손실) 트레이드오프.
+  `packages/core/src/worker.ts::collectStalledLossCandidates`.
 - ❌ **Prometheus/Grafana 관측성** — 3단계 PRD.
 - ❌ **부하 측정, p50/p99, 수평 확장 SLO** — 4단계 PRD.
 

@@ -96,6 +96,11 @@
 - 워커가 처리 도중 죽으면, BullMQ가 stalled 상태로 마킹하고 다른 워커가 회수한다.
 - 회수 후 재시도는 §F2.3의 백오프 정책을 따른다.
 - 본 PRD는 **자체 stalled-job 매니저를 구현하지 않는다**. BullMQ 메커니즘에 의존한다.
+- **stalled-loss recovery (best-effort):** BullMQ 의 'failed' 이벤트가 `job === undefined`
+  로 발화되는 케이스(메타데이터 복구 실패, lock 손실 등)에서 페이로드 손실을 막기 위해
+  워커 프로세스 내부에 in-memory `activeJobs` 맵을 유지한다. 후보(들)를 보수적으로
+  `stalled-loss-recovered` 메시지(class=Retriable)로 DLQ 에 적재한다. 회귀 단언은
+  통합 테스트 IT-S6b 가 담당한다. 구현: `packages/core/src/worker.ts`.
 
 ### F2.6 — 그레이스풀 셧다운(요약)
 - SIGTERM 수신 시:
