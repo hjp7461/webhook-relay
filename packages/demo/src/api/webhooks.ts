@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { Queue } from "bullmq";
+import { timingSafeEqual } from "node:crypto";
 import { addJob } from "@webhook-relay/core";
 import { ROUTE_WEBHOOKS, ERROR_CODES } from "../constants.js";
 import {
@@ -91,14 +92,19 @@ export async function registerWebhooksRoute(
   });
 }
 
-// `Bearer <token>` 형식이며 token 이 일치하는지. 비교는 일정 시간(상수 시간 비교는
-// 본 단계 범위 외 — 시크릿이 32 bytes 짧은 문자열이므로 timing leak 위험은
-// 본 PRD 범위에서 미고려).
+// `Bearer <token>` 형식이며 token 이 일치하는지. 타이밍 공격 회피를 위해
+// 길이 동일성 확인 후 `crypto.timingSafeEqual` 로 비교한다(README §운영 노트).
+// 길이가 다르면 짧은-회로(short-circuit)로 false 를 반환 — 길이 자체의 누출은
+// 일반적으로 수용 가능한 trade-off (시크릿은 항상 32 bytes 로 고정되어 있어
+// 실질적 누출은 없다).
 function isValidBearer(authHeader: string | string[] | undefined, expected: string): boolean {
   if (Array.isArray(authHeader)) return false;
   if (typeof authHeader !== "string") return false;
   const trimmed = authHeader.trim();
   if (!trimmed.toLowerCase().startsWith("bearer ")) return false;
   const token = trimmed.slice("bearer ".length).trim();
-  return token === expected;
+  const a = Buffer.from(token);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
 }
