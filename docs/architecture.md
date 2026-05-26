@@ -30,6 +30,9 @@ Redis(BullMQ) 기반의 **at-least-once 웹훅 전송 작업 큐**. 외부로의
 | **Config** | `packages/demo/src/config.ts` | 환경변수 Zod fail-fast 파싱(시크릿 ≥ 32 bytes) |
 | **Receiver Store** | `packages/demo/src/receiver/store.ts` | 데모 수신자의 최근 N건 in-memory FIFO |
 | **Service Mode** | `packages/demo/src/server.ts` `main()` | `SERVICE_MODE` env (`all` / `api` / `worker`)로 프로세스 모드 분기. `all` = 단일 프로세스(데모 기본값, IT-S7 자식 호환), `api` = Fastify 만, `worker` = BullMQ Worker 만. 동일 이미지를 `docker compose up --scale worker=N` 으로 수평 확장 |
+| **Metrics Endpoint** | `packages/demo/src/api/metrics.ts`, `packages/core/src/metrics.ts` | `GET /metrics` Prometheus 텍스트 응답 (api 모드 3000 / worker 모드 `WORKER_METRICS_PORT=3001`). 도메인 무관 메트릭은 `core/metrics.ts` 에 정의(C1~C11), 도메인 메트릭은 `demo/src/metrics.ts` 에 정의(D1~D3 / W1~W4). 셧다운 진행 중에도 200 유지(Q-OBS-2 (a)) |
+| **Prometheus** | `docker/prometheus.yml`, `docker/prometheus/rules/` | scrape target = `webhook-relay-api` / `webhook-relay-worker`. rule_files glob 으로 SLO/플랫폼 알람 4 group 로드. `docker compose up` 후 `http://localhost:9090` |
+| **Grafana** | `docker/grafana/{dashboards,provisioning}/` | provisioning 으로 datasource(Prometheus) + 대시보드 4종(overview / reliability / dlq / shutdown) 자동 import. `editable: false` / `allowUiUpdates: false` 로 JSON PR 워크플로우 강제. `http://localhost:3001` (데모 기본 admin/admin) |
 
 ### 패키지 경계 (CLAUDE.md §3)
 
@@ -213,6 +216,13 @@ SIGTERM ──► handleSignal()
 - ✅ **HMAC 서명** — HMAC-SHA256, 결정성(재시도 시 동일 서명).
 - ✅ **그레이스풀 셧다운** — SIGTERM 시 진행 작업 완료 + 신규 요청 503(I2.6, I6.3).
 - ✅ **시크릿 fail-fast** — `API_BEARER_TOKEN`, `WEBHOOK_HMAC_SECRET` ≥ 32 bytes, 부트스트랩에서 거부.
+- ✅ **Prometheus/Grafana 관측성** — `GET /metrics` 가 C1~C11(도메인 무관) + D1~D3/W1~W4(도메인) 전건 노출. Grafana 4 대시보드(overview/reliability/dlq/shutdown) 자동 provisioning. 셧다운 진행 중에도 `/metrics` 200 유지(Q-OBS-2 (a), IT-OBS-9). 카디널리티 메트릭당 ≤ 1000(IT-OBS-11).
+- ✅ **SLO + 알람 규칙(잠정값)** — Prometheus rule YAML 4종 + alert 10종을 `docker/prometheus/rules/` 가 보존한다.
+  - **SLO-1 가용성:** `POST /webhooks` 5xx 비율 ≤ 0.5%(28일). burn rate 14.4×/6× page/ticket.
+  - **SLO-2 등록 지연:** `POST /webhooks` p99 ≤ 0.5s(7일).
+  - **SLO-3 전달 지연:** 워커 success 처리 p99 ≤ 5s(7일).
+  - **SLO-4 DLQ 적재율:** `DLQ jobs / processed jobs` ≤ 1%(1h 윈도우, 30m sustained).
+  - 임계 숫자는 잠정값이며 4단계 실측 후 재조정 가능(Q-OBS-11). SLI PromQL 형태와 측정 윈도우는 잠금(I6.1). 알람 라우팅(Alertmanager/Slack/PagerDuty)은 본 시스템 범위 밖(`prd-phase3/05` §1.3).
 
 ### 보장하지 않는다 (본 PRD 범위 밖)
 - ❌ **exactly-once 전달** — 환상에 가깝다. 멱등성으로 수신자가 흡수.
@@ -227,8 +237,8 @@ SIGTERM ──► handleSignal()
   보수적으로 `stalled-loss-recovered` 메시지로 DLQ 에 적재한다. 분류는 Retriable.
   concurrency>1 의 ambiguous 케이스에서는 중복 적재(< 손실) 트레이드오프.
   `packages/core/src/worker.ts::collectStalledLossCandidates`.
-- ❌ **Prometheus/Grafana 관측성** — 3단계 PRD.
 - ❌ **부하 측정, p50/p99, 수평 확장 SLO** — 4단계 PRD.
+- ❌ **알람 외부 라우팅(Alertmanager/Slack/PagerDuty/Email)** — 본 시스템은 alerting rule YAML 까지만 잠근다. 운영 라우팅은 별도 운영 PRD.
 
 ---
 
