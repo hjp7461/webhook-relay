@@ -117,6 +117,22 @@ WebhookCreateRequestSchema = z.object({
   ```
 - 대시보드는 위 JSON을 일정 간격(예: 2~5초)으로 폴링한다. SSE/WebSocket은 본 PRD 범위 밖.
 
+### 6.1 관측 엔드포인트 — `GET /metrics`
+
+3단계 PRD(`docs/prd-phase3/02-metrics-endpoint.md`)가 잠근 라우트. 본 PRD 의 §6
+대시보드 인터페이스와 같은 위치(`packages/demo/src/api/`)에서 동작하나 운영용
+Prometheus 스크레이프 대상이며 인증 없음(Q-OBS-1 (a) — 내부망 전제).
+
+- **메서드/경로:** `GET /metrics`
+- **포트:** api 모드 `3000`, worker 모드 `WORKER_METRICS_PORT=3001`.
+- **Content-Type:** `text/plain; version=0.0.4; charset=utf-8` (prom-client 표준).
+- **본문:** prom-client 텍스트 — C1~C11(도메인 무관) + D1~D3 / W1~W4(도메인) 전건.
+- **셧다운 동작:** draining 진입 후에도 `200` 유지(Q-OBS-2 (a)). `/webhooks` 와
+  `/healthz` 만 `503` 으로 거절하고, `/metrics`/`/dashboard`/`/_demo/receiver`/
+  `/api/queue/stats` 는 200 유지 패턴 일관(본 PRD `06` §6.2 정합).
+
+상세 명세는 [`docs/prd-phase3/02-metrics-endpoint.md`](../prd-phase3/02-metrics-endpoint.md) 참조.
+
 ## 7. 작업 페이로드 (Redis 내부 표현)
 
 워커가 Redis에서 작업을 꺼내 읽을 때, 페이로드를 Zod로 재검증한다.
