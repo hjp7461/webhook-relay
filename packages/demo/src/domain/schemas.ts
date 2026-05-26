@@ -1,4 +1,9 @@
 import { z } from "zod";
+import {
+  IDEMPOTENCY_KEY_MAX,
+  IDEMPOTENCY_KEY_MIN,
+  isValidIdempotencyKey,
+} from "./idempotency-key.js";
 
 // demo/domain/schemas.ts
 //
@@ -21,18 +26,13 @@ function jsonBytes(value: unknown): number {
 // 헤더 값은 string-string 매핑만 허용(블랙리스트 적용은 송신 직전).
 const HeadersSchema = z.record(z.string(), z.string());
 
-// 멱등성 키 정합성(PLAN `04` §3.1, PRD `02` §F2.1).
-// 길이 8~128, 허용 문자 `[A-Za-z0-9_\-]`. 단계 4 에서 동일 규칙의 순수 함수
-// (`assertIdempotencyKey`)를 별도로 둔다(테스트 용이성). 본 스키마와의 정합은
-// 단계 4 에서 헬퍼로 통합한다.
-const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9_\-]+$/;
-
 /**
  * POST /webhooks 요청 본문 스키마. PRD `05` §4.2.
  *
  * M3 단계 정책:
  * - `idempotencyKey` 는 필수(M2 의 선택에서 격상, PRD `02` §F2.1).
- *   누락 시 Zod 가 400 + 필드 메시지로 거부(AC2.2).
+ *   누락/형식 오류 시 Zod 가 400 + 필드 메시지로 거부(AC2.2).
+ *   검증 규칙은 `idempotency-key.ts` 의 순수 함수 단일 출처.
  * - 페이로드는 임의 JSON 객체. 직렬화 바이트가 기본 상한을 넘으면 거부
  *   (런타임 설정값은 부트스트랩 시 결정되지만, 본 스키마는 보수적 기본을 강제).
  */
@@ -43,13 +43,9 @@ export const WebhookCreateRequestSchema = z.object({
     .refine((p) => jsonBytes(p) <= WEBHOOK_DEFAULT_MAX_PAYLOAD_BYTES, {
       message: `payload exceeds default size limit (${WEBHOOK_DEFAULT_MAX_PAYLOAD_BYTES} bytes)`,
     }),
-  idempotencyKey: z
-    .string()
-    .min(8)
-    .max(128)
-    .regex(IDEMPOTENCY_KEY_PATTERN, {
-      message: "idempotencyKey must match [A-Za-z0-9_-] only",
-    }),
+  idempotencyKey: z.string().refine(isValidIdempotencyKey, {
+    message: `idempotencyKey must be ${IDEMPOTENCY_KEY_MIN}-${IDEMPOTENCY_KEY_MAX} chars matching [A-Za-z0-9_-]`,
+  }),
   headers: HeadersSchema.optional(),
 });
 
