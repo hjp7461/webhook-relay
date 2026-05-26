@@ -72,28 +72,87 @@ Producer ──add──> BullMQ Queue ──> Worker pool (수평 확장)
 ### D1. 전달 보장: at-least-once + 멱등성
 - **문제:** 워커가 작업을 처리하고 ACK하기 직전에 죽으면? 중복 전송 위험.
 - **선택지:** exactly-once(환상에 가깝고 비용이 큼) vs at-least-once + 애플리케이션 멱등성.
-- **결정:** at-least-once를 받아들이고, 모든 웹훅 작업에 멱등성 키를 강제해
-  수신 측에서 중복을 흡수할 수 있게 한다. _(근거 채울 자리)_
-- **한계:** 멱등성 키 관리 책임이 작업 정의자에게 있다. _(보완 방안 채울 자리)_
+- **결정:** at-least-once를 받아들이고, 모든 웹훅 작업에 `idempotencyKey`를 **필수**로 받아
+  BullMQ의 `jobId` 시맨틱(동일 ID 중복 흡수)에 의존한다. 자체 키 저장소를 만들지 않는다.
+- **근거:** 외부 HTTP 수신자가 우리 트랜잭션에 참여할 수 없으므로 exactly-once는 본질적으로
+  달성 불가(Two Generals). 검증된 BullMQ 메커니즘 위에 추상화를 쌓는 것은 새 일관성 문제를
+  만들 뿐이라 정책상 금지(`CLAUDE.md §7-3`). IT-S2가 동시 3회 등록 시 핸들러 호출 == 1을
+  통합 테스트로 증명.
+- **한계:** 멱등성 키 관리 책임이 작업 정의자(클라이언트)에게 있다. 잘못된 클라이언트가 매번
+  새 키를 생성하면 막을 수 없다. 보완: 수신자 측에서도 자체 멱등성 흡수 권장(이중 안전망).
+- **상세:** [ADR-002 — at-least-once + 멱등성 키 강제](./docs/adr/ADR-002-at-least-once-with-idempotency.md)
 
 ### D2. 재시도 전략과 DLQ
 - **문제:** 일시적 실패(네트워크, 5xx)와 영구적 실패(4xx)를 같게 다루면 안 된다.
-- **결정:** 재시도 가능/불가 에러를 명시적으로 분류. 가능 에러는 지수 백오프로 N회 재시도,
-  초과 시 DLQ로 격리. 불가 에러는 즉시 격리. _(파라미터·근거 채울 자리)_
-- **한계:** poison message가 DLQ에 쌓일 때의 운영 절차. _(채울 자리)_
+- **결정:** 재시도 가능/불가 에러를 `classifyDeliveryFailure({httpStatus?, cause?})`로 명시적
+  분류. 가능 에러는 지수 백오프(`baseMs * 2^(attempt-1)`)로 N회 재시도, 초과 시 DLQ로 격리.
+  불가 에러(`NonRetriableError`)는 BullMQ `UnrecoverableError`로 변환해 즉시 격리.
+- **파라미터(기본값):** `WEBHOOK_MAX_ATTEMPTS=5`, `WEBHOOK_BACKOFF_BASE_MS=1000`, jitter 없음
+  (결정성 우선 — IT-S3가 fake-timer 없는 wall-clock 단언으로 검증).
+- **분류 규칙(Q-RETRY-1/2 잠금):** 5xx / 408 / 425 / 429 / timeout / DNS / ECONNREFUSED →
+  Retriable. 4xx / 3xx → NonRetriable (자동 리다이렉트 안 함, SSRF/체인 우려).
+- **DLQ 시맨틱:** 별도 큐(`<QUEUE_NAME>-dlq`)에 페이로드 + `lastError: { class, httpStatus,
+  attemptsMade, message }` 보존. 원 큐는 `removeOnFail: { count: 0 }`로 즉시 제거(단방향
+  보장, I2.4).
+- **한계 1:** poison message가 DLQ에 쌓일 때의 운영 절차(재투입 / 분석 / 알람)는 본 PRD
+  범위 밖(Q-DLQ-1 (a) "두지 않음"). 후속 PRD에서 다룬다.
+- **한계 2:** `failed(job===undefined)`로 발화되는 stalled-limit 초과 케이스는 현재 silent
+  return → 페이로드 손실 가능성 잔존. 후속 결정 + DLQ 이동 정책 필요.
 
 ### D3. 그레이스풀 셧다운
 - **문제:** 무중단 배포/스케일 인 시 진행 중 작업이 잘리면 안 된다.
-- **결정:** SIGTERM 수신 시 새 작업 수신을 멈추고 진행 중 작업을 마친 뒤 종료. _(채울 자리)_
+- **결정:** SIGTERM/SIGINT 수신 시 다음 시퀀스를 `core.gracefulShutdown(...)`이 수행한다.
+  1. `httpServer.setDraining(true)` — `POST /webhooks`와 `GET /healthz`가 `503` 응답.
+     `/dashboard`와 `/_demo/receiver`는 200 유지(관측성/데모 동작 보존).
+  2. `worker.close({ force: false })` vs `SHUTDOWN_TIMEOUT_MS` race.
+  3. 타임아웃 도달 시: `worker.getJobs(['active'])`로 잔여 ID 수집 →
+     `onTimeout(remainingJobIds)` 호출 → 구조화 JSON 한 줄 로그.
+  4. `httpServer.close()` → `queue.close()` → `dlqQueue.close()` → `redis.quit()`.
+  5. `process.exit(0)` (정상 완료) 또는 `process.exit(1)` (잔여 작업 있었음, Q-SEC-4 (b)).
+- **테스트:** IT-S7이 `child_process.spawn`으로 실제 자식 프로세스를 띄우고 실제 SIGTERM을
+  전송한다(Q-OPS-2 (b)). 동일 프로세스 시뮬레이션이 아닌 "진짜 시그널" 검증.
+- **한계:** 중복 SIGTERM은 무시(boolean guard). 운영자가 연속으로 SIGTERM을 보내도 강제
+  종료 fast-path는 본 PRD 범위 밖. Node의 `SIGKILL`은 잡을 수 없다.
 
 ### D4. 기술 선택: 왜 BullMQ인가 (vs Raw Redis Streams, vs Kafka)
 - **vs Raw Streams:** BullMQ는 내부적으로 Redis Streams 위에 구현되어 있으며,
   재시도·DLQ·스케줄링·stalled-job 회수를 직접 짜는 대신 검증된 추상화를 쓴다.
-  "추상화의 비용"은 별도 부록(부록 트랙)에서 직접 구현과 벤치마크로 정량 분석할 예정.
+  본 PRD의 어필 포인트는 "원리를 직접 짤 수 있다"가 아니라 **"보장이 무엇이고 어떻게
+  검증하는지를 안다"**이다(`CLAUDE.md §1`). "추상화의 비용"은 부록 트랙에서 동일 보장을
+  Raw Streams로 직접 구현해 처리량/지연을 정량 비교할 예정.
 - **vs Kafka:** 작업 큐(개별 작업의 신뢰성 있는 실행)와 이벤트 스트리밍(durable·replayable
   로그)은 다른 문제를 푸는 도구다. 웹훅 재시도 워크로드는 전형적 작업 큐 영역이며,
   Kafka의 브로커/파티션 운영 복잡성과 까다로운 재시도 모델은 이 규모에 과하다.
-  _(상세 ADR은 추후 `docs/adr/` 에 별도 문서로 작성)_
+- **상세:** [ADR-001 — BullMQ vs Raw Redis Streams vs Kafka](./docs/adr/ADR-001-bullmq-vs-streams-vs-kafka.md)
+
+---
+
+## 운영 노트
+
+본 저장소는 **데모/로컬 전제**로 작성되어 있습니다. 운영 환경에 그대로 배포하지 마세요.
+운영 전환 전에 다음 항목을 별도 PR로 보강해야 합니다.
+
+- **시크릿 관리:** `API_BEARER_TOKEN` / `WEBHOOK_HMAC_SECRET`은 32 bytes 이상이며,
+  코드/리포지토리에 직접 두지 말 것. 발급은 `openssl rand -hex 32`. 운영에서는
+  Docker secrets / Kubernetes Secret / AWS Secrets Manager 같은 비밀 관리 인프라 사용.
+- **Bearer timing-safe 비교:** 현재는 `===`. 운영 노출 전 `crypto.timingSafeEqual`로
+  교체(타이밍 공격 회피).
+- **SSRF strict 모드:** `ALLOW_PRIVATE_TARGETS=false`. 현 구현은 hostname 문자열 검사만
+  — 동적 DNS가 사설 IP로 회귀하는 케이스는 잡지 못한다(후속 강화 필요).
+- **HMAC replay 방어:** 현재는 본문 HMAC만(timestamp/nonce 없음, Q-SEC-2 (a)). 운영에서
+  replay 위협이 있다면 `X-Webhook-Timestamp` + nonce 도입을 별도 PR로.
+- **API vs Worker 프로세스 분리:** 본 PRD MVP는 단일 프로세스. 운영에서는 두 역할을
+  별도 컨테이너로 띄우고 워커만 수평 확장하는 것이 일반적이다(4단계 PRD 영역).
+- **Redis 운영:** 본 데모는 단일 Redis 인스턴스. HA가 필요하면 Redis Sentinel 또는
+  Cluster 구성, BullMQ의 `connection` 옵션 갱신 필요.
+- **DLQ 운영 절차:** 자동 재투입은 본 PRD 범위 밖(Q-DLQ-1). 운영자가 DLQ를 주기적으로
+  검사하고, poison message는 페이로드 분석 후 수동으로 처리하거나 제거하는 절차 필요.
+- **`removeOnComplete` 정책:** 완료 작업은 Redis 메모리 누적 방지를 위해 일정 개수/시간
+  뒤 자동 제거. 본 저장소는 `count: 1000`, `age: 86400s`로 설정(`packages/demo/src/constants.ts`).
+  관측성 요구가 강하다면 3단계 PRD에서 보관 기간을 늘리거나 별도 저장소로 옮길 수 있음.
+
+> 운영 전환 전에 검토할 항목 전체 목록은 `docs/architecture.md §5`의 "보장하지 않는다" 절
+> 참조.
 
 ---
 
@@ -107,6 +166,8 @@ pnpm test:integration # 통합 (Testcontainers로 실제 Redis 기동)
 
 장애 복구·동시성 시나리오는 모킹이 아니라 **실제 Redis 컨테이너**로 검증합니다.
 검증 시나리오 목록은 `CLAUDE.md` §5 참조.
+
+현재 상태: **74 tests passed** (UT-1~6 + IT-R1 + IT-S1~S7). 7개 핵심 시나리오 전건 그린.
 
 ---
 
@@ -135,10 +196,11 @@ pnpm test:integration # 통합 (Testcontainers로 실제 Redis 기동)
 
 ## 로드맵
 
-- [ ] 1단계 — MVP: 작업 등록 → 워커 처리 → 대시보드 표시
-- [ ] 2단계 — 장애 복구: 멱등성, 백오프 재시도, DLQ, stalled-job 회수
+- [x] 1단계 — MVP: 작업 등록 → 워커 처리 → 대시보드 표시 _(IT-S1)_
+- [x] 2단계 — 장애 복구: 멱등성, 백오프 재시도, DLQ, stalled-job 회수, 그레이스풀 셧다운
+      _(IT-S2 ~ IT-S7)_
 - [ ] 3단계 — 관측성: Prometheus 메트릭 + Grafana 대시보드
-- [ ] 4단계 — 부하 테스트 + 그레이스풀 셧다운 + 수평 확장 측정
+- [ ] 4단계 — 부하 테스트 + 수평 확장 측정 + API/Worker 프로세스 분리
 - [ ] (부록) Raw Redis Streams로 큐 내부 직접 구현 + 추상화 비용 벤치마크
 
 ---
