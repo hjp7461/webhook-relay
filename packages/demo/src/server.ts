@@ -2,9 +2,11 @@ import Fastify, { type FastifyInstance } from "fastify";
 import {
   buildWorkerRetryOptions,
   createConnection,
+  createDlqQueue,
   createQueue,
   createWorker,
   type CoreJobHandler,
+  type DlqJobData,
 } from "@webhook-relay/core";
 import type { Queue, Worker } from "bullmq";
 import type { Redis } from "ioredis";
@@ -18,16 +20,21 @@ import { registerDashboardRoutes } from "./api/dashboard.js";
 import { registerHealthzRoute } from "./api/healthz.js";
 import { createWebhookDeliveryHandler } from "./handlers/webhook-delivery.js";
 import type { WebhookJobData } from "./domain/schemas.js";
+import { DLQ_NAME as CONSTANT_DLQ_NAME, QUEUE_NAME as CONSTANT_QUEUE_NAME } from "./constants.js";
 
 // demo/server.ts
 //
 // 부트스트랩: 환경변수 파싱 → 연결 → 큐/워커 → Fastify 라우트 등록.
 // API 와 워커가 같은 프로세스에서 동작(PRD `01` MVP 범위).
 // SIGINT/SIGTERM 수신 시 close 호출은 최소한만 — 전체 시퀀스는 M7 의 책임.
+//
+// M5: 별도 DLQ Queue 를 함께 생성하고 워커에 주입. 원 큐의 작업은
+// removeOnFail: { count: 0 } 으로 즉시 제거 — DLQ 단방향(I2.4) 보강.
 
 export interface BuiltServer {
   readonly fastify: FastifyInstance;
   readonly queue: QueueFacade;
+  readonly dlqQueue: Queue<DlqJobData<WebhookJobData>, void, string>;
   readonly worker: Worker<WebhookJobData, void, string>;
   readonly receiverStore: ReceiverStore;
   readonly connection: Redis;
@@ -40,7 +47,33 @@ export interface QueueFacade {
   getJobState(jobId: string): Promise<string | undefined>;
 }
 
+/**
+ * AC5.5 보강: 큐/DLQ 이름이 `constants.ts` 와 환경변수 사이에 어긋나지
+ * 않는지 검증한다. 운영 기본(둘 다 constants 와 동일)이거나, 커스터마이즈
+ * 시에도 `DLQ_NAME == `${QUEUE_NAME}-dlq`` 컨벤션을 따라야 한다(통합
+ * 테스트의 격리 큐도 본 컨벤션으로 작성). 어느 쪽도 아니면 fail-fast.
+ */
+function assertQueueNameConsistency(config: AppConfig): void {
+  const defaultPair =
+    config.QUEUE_NAME === CONSTANT_QUEUE_NAME && config.DLQ_NAME === CONSTANT_DLQ_NAME;
+  const conventionPair = config.DLQ_NAME === `${config.QUEUE_NAME}-dlq`;
+  if (!defaultPair && !conventionPair) {
+    throw new Error(
+      `[config] DLQ_NAME (${JSON.stringify(config.DLQ_NAME)}) must match either ` +
+        `constants.DLQ_NAME (${JSON.stringify(CONSTANT_DLQ_NAME)}) or the ` +
+        `\`${config.QUEUE_NAME}-dlq\` convention`,
+    );
+  }
+  if (config.DLQ_NAME === config.QUEUE_NAME) {
+    throw new Error(
+      `[config] DLQ_NAME must not equal QUEUE_NAME (${JSON.stringify(config.QUEUE_NAME)})`,
+    );
+  }
+}
+
 export async function buildServer(config: AppConfig): Promise<BuiltServer> {
+  assertQueueNameConsistency(config);
+
   const connection = createConnection({
     url: config.REDIS_URL,
     reconnectBaseMs: config.REDIS_RECONNECT_BASE_MS,
@@ -50,6 +83,8 @@ export async function buildServer(config: AppConfig): Promise<BuiltServer> {
   // M4: 모든 add 작업에 동일 재시도 정책을 자동 적용한다.
   // BullMQ 표준 옵션(attempts + backoff: exponential)을 사용(F2.3).
   // 자체 백오프 구현 금지(AC-M4).
+  // M5: removeOnFail: { count: 0 } 로 종단 실패 시 원 큐에서 즉시 제거.
+  //     DLQ 단방향(I2.4) 보강 — "원 큐에 없음" 단언 안정화.
   const retryDefaults = buildWorkerRetryOptions({
     maxAttempts: config.WEBHOOK_MAX_ATTEMPTS,
     backoffBaseMs: config.WEBHOOK_BACKOFF_BASE_MS,
@@ -60,8 +95,14 @@ export async function buildServer(config: AppConfig): Promise<BuiltServer> {
       defaultJobOptions: {
         attempts: retryDefaults.attempts,
         backoff: { ...retryDefaults.backoff },
+        removeOnFail: { count: 0 },
       },
     },
+  });
+
+  // M5: 별도의 DLQ 큐. 워커가 종단 실패 시 새 항목을 적재한다.
+  const dlqQueue = createDlqQueue<WebhookJobData>(config.DLQ_NAME, {
+    connection,
   });
 
   const receiverStore = new ReceiverStore();
@@ -99,11 +140,13 @@ export async function buildServer(config: AppConfig): Promise<BuiltServer> {
   });
 
   // handler 의 generic 은 unknown — 큐 페이로드는 핸들러 내부에서 zod 로 재검증.
+  // M5: dlqQueue 주입 — core 가 종단 실패 시 새 항목을 적재.
   const worker = createWorker<WebhookJobData>(config.QUEUE_NAME, handler, {
     connection,
     workerOptions: {
       concurrency: config.WORKER_CONCURRENCY,
     },
+    dlqQueue,
   });
 
   const facade: QueueFacade = {
@@ -131,6 +174,11 @@ export async function buildServer(config: AppConfig): Promise<BuiltServer> {
       // best-effort
     }
     try {
+      await dlqQueue.close();
+    } catch {
+      // best-effort
+    }
+    try {
       await fastify.close();
     } catch {
       // best-effort
@@ -145,6 +193,7 @@ export async function buildServer(config: AppConfig): Promise<BuiltServer> {
   return {
     fastify,
     queue: facade,
+    dlqQueue,
     worker,
     receiverStore,
     connection,
