@@ -23,7 +23,12 @@ import { registerDashboardRoutes } from "./api/dashboard.js";
 import { registerHealthzRoute } from "./api/healthz.js";
 import { createWebhookDeliveryHandler } from "./handlers/webhook-delivery.js";
 import type { WebhookJobData } from "./domain/schemas.js";
-import { DLQ_NAME as CONSTANT_DLQ_NAME, QUEUE_NAME as CONSTANT_QUEUE_NAME } from "./constants.js";
+import {
+  DLQ_NAME as CONSTANT_DLQ_NAME,
+  QUEUE_NAME as CONSTANT_QUEUE_NAME,
+  REMOVE_ON_COMPLETE_AGE_SECONDS,
+  REMOVE_ON_COMPLETE_COUNT,
+} from "./constants.js";
 
 // demo/server.ts
 //
@@ -95,6 +100,8 @@ export async function buildServer(config: AppConfig): Promise<BuiltServer> {
   // 자체 백오프 구현 금지(AC-M4).
   // M5: removeOnFail: { count: 0 } 로 종단 실패 시 원 큐에서 즉시 제거.
   //     DLQ 단방향(I2.4) 보강 — "원 큐에 없음" 단언 안정화.
+  // removeOnComplete: 완료 작업이 Redis 에 무한 누적되어 메모리를 잠식하는 것을 막는다.
+  //     count + age 정책(constants.ts) — 운영 노트는 README §운영 노트 참조.
   const retryDefaults = buildWorkerRetryOptions({
     maxAttempts: config.WEBHOOK_MAX_ATTEMPTS,
     backoffBaseMs: config.WEBHOOK_BACKOFF_BASE_MS,
@@ -106,6 +113,10 @@ export async function buildServer(config: AppConfig): Promise<BuiltServer> {
         attempts: retryDefaults.attempts,
         backoff: { ...retryDefaults.backoff },
         removeOnFail: { count: 0 },
+        removeOnComplete: {
+          count: REMOVE_ON_COMPLETE_COUNT,
+          age: REMOVE_ON_COMPLETE_AGE_SECONDS,
+        },
       },
     },
   });

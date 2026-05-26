@@ -29,6 +29,14 @@ export const OUTGOING_HEADER_BLACKLIST: readonly string[] = [
 // 데모 수신자 메모리 저장소 보관 한도(PRD `01` F1.3 — 최근 N건).
 export const RECEIVER_STORE_LIMIT = 50;
 
+// 완료 작업의 Redis 보관 한도. 이 정책이 없으면 Redis 메모리가 누적된다.
+// - count: 가장 최근 N건만 유지(관측·디버깅 용도)
+// - age: N초 이후 자동 제거(고른 분포 보장)
+// 본 PRD 범위에서는 환경변수로 노출하지 않는다(YAGNI). 운영에서 보관 기간을
+// 늘리고 싶다면 본 상수 또는 별도 env 도입을 후속 PR로 결정.
+export const REMOVE_ON_COMPLETE_COUNT = 1000;
+export const REMOVE_ON_COMPLETE_AGE_SECONDS = 24 * 60 * 60; // 24h
+
 // 에러 코드(PRD `05` §4.4 형식).
 export const ERROR_CODES = {
   VALIDATION: "ERR_VALIDATION",
