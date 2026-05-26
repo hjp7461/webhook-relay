@@ -216,12 +216,21 @@ PLAN 단계의 IT-OBS-N 테스트는 본 매트릭스를 단언한다.
 ### 6.1 분담 원칙 (CLAUDE.md §3 정합)
 
 - **`core`가 정의:** §3.1 큐/워커 메트릭 (C1~C11). 이름·라벨·헬프 텍스트에
-  `webhook`/`http`/`fastify`/`_demo` 등 도메인 식별자가 등장하지 않는다.
+  `webhook`/`fastify`/`_demo` 등 도메인 식별자가 등장하지 않는다.
   접두 `webhook_relay_*`의 `webhook_relay`는 **애플리케이션 식별자**(prom-client
   컨벤션의 prefix)이지 도메인 식별자가 아니다. 모호함을 피하기 위해 본 PRD는
-  `core` 모듈 내부에서는 "도메인 식별자 = `webhook` / `delivery` / `http` /
+  `core` 모듈 내부에서는 "도메인 식별자 = `webhook` / `delivery` /
   `fastify` / `receiver` / `_demo`" 로 정의한다 (`webhook_relay` 접두는 IT-R1
   grep 대상에서 **예외 처리**해야 함 — `05` §3 PRD 변경 제안 참조).
+- **`http` 는 도메인 식별자 집합에서 제외 (2026-05-27 잠금):** 1~2단계 잔존
+  식별자 `httpServer` (in `packages/core/src/shutdown.ts`) / `httpStatus`
+  (in `packages/core/src/errors.ts`, `worker.ts`) 가 `core` 의 일반적 HTTP
+  표준 어휘(웹훅 도메인이 아니라 RFC HTTP 의미)로 사용되며, rename 시 1~2단계
+  공개 API 시그니처와 architecture.md §2 의 컴포넌트 표가 동시에 깨진다.
+  따라서 본 PRD 는 `http` 를 BANNED_TOKENS_SET 에서 제외한 현 IT-R1 상태를
+  **정식 정책**으로 잠근다 — `core` 내부에서 `http*` 식별자는 RFC HTTP 어휘에
+  한해 허용한다. 웹훅 도메인 의미(`webhook`/`delivery`/`receiver`/`_demo`)는
+  여전히 금지.
 - **`demo`가 정의:** §3.2 HTTP API + §3.3 웹훅 도메인 메트릭 (D1~D3, W1~W4).
   Fastify/외부 수신자 의존이 있어 `core`에 둘 수 없다.
 - **Registry 공유:** 단일 default registry. `core`와 `demo`가 각자 자기 메트릭을
