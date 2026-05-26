@@ -1,5 +1,4 @@
 import type { FastifyInstance } from "fastify";
-import type { Queue } from "bullmq";
 import { ROUTE_DASHBOARD, ROUTE_QUEUE_STATS } from "../constants.js";
 
 // demo/api/dashboard.ts — GET /dashboard (HTML), GET /api/queue/stats (JSON)
@@ -7,8 +6,15 @@ import { ROUTE_DASHBOARD, ROUTE_QUEUE_STATS } from "../constants.js";
 // PRD `01` F1.4 / `05` §6. 별도 프론트엔드 의존성 도입 금지 — HTML 인라인.
 // dlq 카운터는 M5 에서 추가. 본 M2 에서는 메인 큐 카운터만 노출.
 
+// 큐의 generic 파라미터에 대해 invariant 한 의존을 피하기 위해 구조적 인터페이스로 선언.
+export interface JobCountsProvider {
+  getJobCounts(
+    ...types: Array<"waiting" | "active" | "completed" | "failed" | "delayed">
+  ): Promise<Record<string, number>>;
+}
+
 export interface DashboardRouteDeps {
-  readonly queue: Queue<unknown, unknown, string>;
+  readonly queue: JobCountsProvider;
 }
 
 export async function registerDashboardRoutes(

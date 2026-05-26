@@ -42,7 +42,7 @@ export function createWebhookDeliveryHandler(
       const result: DeliverResult = await deliver({
         url: data.url,
         payload: data.payload,
-        headers: data.headers,
+        ...(data.headers !== undefined ? { headers: data.headers } : {}),
         timeoutMs: deps.deliveryTimeoutMs,
         allowPrivateTargets: deps.allowPrivateTargets,
       });
