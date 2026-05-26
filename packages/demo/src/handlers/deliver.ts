@@ -1,7 +1,26 @@
 import { lookup as dnsLookup } from "node:dns/promises";
-import { NonRetriableError } from "@webhook-relay/core";
-import { OUTGOING_HEADER_BLACKLIST } from "../constants.js";
+import { NonRetriableError, RetriableError } from "@webhook-relay/core";
+import {
+  DELIVERY_RESULT_HTTP_ERROR,
+  DELIVERY_RESULT_NETWORK_ERROR,
+  DELIVERY_RESULT_SSRF_BLOCKED,
+  DELIVERY_RESULT_SUCCESS,
+  DELIVERY_RESULT_TIMEOUT,
+  ERROR_CLASS_NONE,
+  ERROR_CLASS_NON_RETRIABLE,
+  ERROR_CLASS_RETRIABLE,
+  HTTP_STATUS_CLASS_NONE,
+  OUTGOING_HEADER_BLACKLIST,
+  STATUS_CLASS_2XX,
+  STATUS_CLASS_3XX,
+  STATUS_CLASS_4XX,
+  STATUS_CLASS_5XX,
+  type DeliveryResult,
+  type ErrorClass,
+  type HttpStatusClass,
+} from "../constants.js";
 import { signHmacSha256 } from "../domain/hmac.js";
+import { deliveriesTotal, deliveryDurationSeconds } from "../metrics.js";
 import { classifyDeliveryFailure } from "./classify-error.js";
 
 // DNS 조회 자체의 짧은 timeout. 2초 안에 결과가 안 오면 보수적으로 거부.
@@ -43,86 +62,241 @@ export interface DeliverResult {
  * 성공(2xx) 시 DeliverResult 반환. 비-2xx 또는 네트워크 에러 시
  * classifyDeliveryFailure 결과를 throw 한다(RetriableError 또는
  * NonRetriableError).
+ *
+ * M-OBS-3 W1/W2 wiring:
+ * - 본 함수의 모든 종단 경로(성공/throw)에서 정확히 한 번 W1 inc + W2 observe.
+ * - 매핑은 본 모듈 하단의 `mapDeliveryLabels` 헬퍼가 결정한다(step 9 refactor).
+ * - 메트릭 갱신은 동기 호출(hot path 비차단 — I3.5).
  */
 export async function deliver(input: DeliverInput): Promise<DeliverResult> {
-  if (!input.allowPrivateTargets) {
-    // 1차 가드: hostname 문자열만으로 빠른 거부(localhost / 점-십진 사설 / IPv6).
-    if (isPrivateUrl(input.url)) {
-      throw new NonRetriableError(
-        `Refusing to deliver to private/loopback target (ALLOW_PRIVATE_TARGETS=false)`,
-      );
-    }
-    // 2차 가드: DNS 조회 결과 IP 가 사설 CIDR 에 속하면 거부. 동적 DNS 우회
-    // (`evil.example.com` → `10.0.0.1`) 차단. DNS 조회 자체가 시간을 소모하므로
-    // 짧은 timeout(보수적으로 거부) 적용.
-    const hostname = extractHostname(input.url);
-    if (hostname !== undefined) {
-      const addrs = await resolveHostAddresses(hostname);
-      if (addrs === "timeout") {
+  // W1/W2 wiring 컨텍스트. 종단에서 라벨을 결정해 inc/observe 한다.
+  const start = Date.now();
+  let labels: DeliveryLabels;
+  try {
+    if (!input.allowPrivateTargets) {
+      // 1차 가드: hostname 문자열만으로 빠른 거부(localhost / 점-십진 사설 / IPv6).
+      if (isPrivateUrl(input.url)) {
         throw new NonRetriableError(
-          `Refusing to deliver: DNS lookup timed out (>${DNS_LOOKUP_TIMEOUT_MS}ms)`,
+          `Refusing to deliver to private/loopback target (ALLOW_PRIVATE_TARGETS=false)`,
         );
       }
-      for (const ip of addrs) {
-        if (isPrivateIp(ip)) {
+      // 2차 가드: DNS 조회 결과 IP 가 사설 CIDR 에 속하면 거부. 동적 DNS 우회
+      // (`evil.example.com` → `10.0.0.1`) 차단. DNS 조회 자체가 시간을 소모하므로
+      // 짧은 timeout(보수적으로 거부) 적용.
+      const hostname = extractHostname(input.url);
+      if (hostname !== undefined) {
+        const addrs = await resolveHostAddresses(hostname);
+        if (addrs === "timeout") {
           throw new NonRetriableError(
-            `Refusing to deliver to private/loopback target (DNS resolved ${hostname} to private IP)`,
+            `Refusing to deliver: DNS lookup timed out (>${DNS_LOOKUP_TIMEOUT_MS}ms)`,
           );
+        }
+        for (const ip of addrs) {
+          if (isPrivateIp(ip)) {
+            throw new NonRetriableError(
+              `Refusing to deliver to private/loopback target (DNS resolved ${hostname} to private IP)`,
+            );
+          }
         }
       }
     }
-  }
 
-  const sanitizedHeaders = sanitizeOutgoingHeaders(input.headers);
-  const body = JSON.stringify(input.payload ?? {});
-  // HMAC 서명 — raw body 에 대해 결정성(Q-SEC-2 (a)). 송신 직전 생성.
-  const signature = signHmacSha256(input.hmacSecret, body);
+    const sanitizedHeaders = sanitizeOutgoingHeaders(input.headers);
+    const body = JSON.stringify(input.payload ?? {});
+    // HMAC 서명 — raw body 에 대해 결정성(Q-SEC-2 (a)). 송신 직전 생성.
+    const signature = signHmacSha256(input.hmacSecret, body);
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), input.timeoutMs);
-  const start = Date.now();
-  try {
-    let res: Response;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), input.timeoutMs);
     try {
-      res = await fetch(input.url, {
-        method: "POST",
-        headers: {
-          ...sanitizedHeaders,
-          "content-type": "application/json",
-          // HMAC 헤더는 블랙리스트와 별개로 항상 부착(서명 무결성 보장).
-          [input.hmacHeaderName]: signature,
-        },
-        body,
-        // 보수적: 자동 리다이렉트 금지(SSRF/체인 우려, Q-RETRY-1 (a)).
-        redirect: "manual",
-        signal: controller.signal,
-      });
-    } catch (cause) {
-      // 네트워크 에러(타임아웃 AbortError / DNS / ECONNREFUSED 등).
-      // classifyDeliveryFailure 가 RetriableError(보수적) 로 매핑.
-      throw classifyDeliveryFailure({ cause });
-    }
-    const durationMs = Date.now() - start;
-    if (res.status >= 200 && res.status < 300) {
-      // 연결 누수를 피하기 위해 body drain.
+      let res: Response;
+      try {
+        res = await fetch(input.url, {
+          method: "POST",
+          headers: {
+            ...sanitizedHeaders,
+            "content-type": "application/json",
+            // HMAC 헤더는 블랙리스트와 별개로 항상 부착(서명 무결성 보장).
+            [input.hmacHeaderName]: signature,
+          },
+          body,
+          // 보수적: 자동 리다이렉트 금지(SSRF/체인 우려, Q-RETRY-1 (a)).
+          redirect: "manual",
+          signal: controller.signal,
+        });
+      } catch (cause) {
+        // 네트워크 에러(타임아웃 AbortError / DNS / ECONNREFUSED 등).
+        // classifyDeliveryFailure 가 RetriableError(보수적) 로 매핑.
+        throw classifyDeliveryFailure({ cause });
+      }
+      const durationMs = Date.now() - start;
+      if (res.status >= 200 && res.status < 300) {
+        // 연결 누수를 피하기 위해 body drain.
+        try {
+          await res.arrayBuffer();
+        } catch {
+          // best-effort drain — 실패해도 송신 자체는 성공으로 간주.
+        }
+        // 성공 경로 — W1/W2 라벨 결정 + 메트릭 갱신 후 결과 반환.
+        labels = mapDeliveryLabels({ status: res.status });
+        recordDeliveryMetrics(labels, durationMs);
+        return { status: res.status, durationMs };
+      }
+      // 비-2xx 응답 — 분류 함수로 매핑.
+      // 응답 body 는 drain 후 폐기(다음 시도/로깅에 사용하지 않음 — 본 PRD 범위).
       try {
         await res.arrayBuffer();
       } catch {
-        // best-effort drain — 실패해도 송신 자체는 성공으로 간주.
+        // best-effort drain.
       }
-      return { status: res.status, durationMs };
+      throw classifyDeliveryFailure({ httpStatus: res.status });
+    } finally {
+      clearTimeout(timer);
     }
-    // 비-2xx 응답 — 분류 함수로 매핑.
-    // 응답 body 는 drain 후 폐기(다음 시도/로깅에 사용하지 않음 — 본 PRD 범위).
-    try {
-      await res.arrayBuffer();
-    } catch {
-      // best-effort drain.
-    }
-    throw classifyDeliveryFailure({ httpStatus: res.status });
-  } finally {
-    clearTimeout(timer);
+  } catch (err) {
+    // 모든 throw 경로의 종단. W1/W2 라벨을 결정한 뒤 메트릭 갱신 후 재throw.
+    const durationMs = Date.now() - start;
+    labels = mapDeliveryLabels({ error: err });
+    recordDeliveryMetrics(labels, durationMs);
+    throw err;
   }
+}
+
+// ---------------------------------------------------------------------------
+// W1/W2 라벨 매핑 + 갱신 helper
+// ---------------------------------------------------------------------------
+
+interface DeliveryLabels {
+  readonly result: DeliveryResult;
+  readonly http_status_class: HttpStatusClass;
+  readonly error_class: ErrorClass;
+}
+
+/**
+ * 송신 종단의 status code(성공) 또는 throw 된 에러(실패)를 입력으로 받아
+ * W1/W2 라벨을 결정한다. PLAN `04` §4 step 9 — 단일 출처.
+ *
+ * 분기 규칙(PRD `prd-phase3/01` §4.2 정합):
+ * - SSRF 차단(메시지로 식별) → `ssrf_blocked` / `none` / NonRetriableError.
+ * - AbortError(타임아웃) → `timeout` / `none` / RetriableError.
+ * - 네트워크 에러(httpStatus 부재) → `network_error` / `none` / RetriableError.
+ * - http 5xx → `http_error` / `5xx` / RetriableError.
+ * - http 4xx → `http_error` / `4xx` / NonRetriableError.
+ * - http 3xx → `http_error` / `3xx` / NonRetriableError(Q-RETRY-1 (a)).
+ * - 2xx 성공 → `success` / `2xx` / none.
+ */
+function mapDeliveryLabels(input: {
+  readonly status?: number;
+  readonly error?: unknown;
+}): DeliveryLabels {
+  // 성공 케이스 — 2xx 응답.
+  if (typeof input.status === "number") {
+    const httpStatusClass = classifyHttpStatus(input.status);
+    if (httpStatusClass === STATUS_CLASS_2XX) {
+      return {
+        result: DELIVERY_RESULT_SUCCESS,
+        http_status_class: STATUS_CLASS_2XX,
+        error_class: ERROR_CLASS_NONE,
+      };
+    }
+    // 비-2xx 가 mapDeliveryLabels.status 경로로 들어오는 일은 없다(throw 경로
+    // 로 떨어진다). 방어적으로 http_error.
+    return {
+      result: DELIVERY_RESULT_HTTP_ERROR,
+      http_status_class: httpStatusClass ?? HTTP_STATUS_CLASS_NONE,
+      error_class: ERROR_CLASS_RETRIABLE,
+    };
+  }
+
+  const err = input.error;
+  // SSRF 차단 — NonRetriableError 의 메시지로 식별. classifyDeliveryFailure 이
+  // 거치지 않고 deliver() 가 직접 throw 한 경우만 해당.
+  if (err instanceof NonRetriableError && isSsrfBlockMessage(err.message)) {
+    return {
+      result: DELIVERY_RESULT_SSRF_BLOCKED,
+      http_status_class: HTTP_STATUS_CLASS_NONE,
+      error_class: ERROR_CLASS_NON_RETRIABLE,
+    };
+  }
+  // RetriableError + httpStatus 가 있으면 5xx http_error.
+  if (err instanceof RetriableError) {
+    const status = err.httpStatus;
+    if (typeof status === "number") {
+      const cls = classifyHttpStatus(status);
+      return {
+        result: DELIVERY_RESULT_HTTP_ERROR,
+        http_status_class: cls ?? HTTP_STATUS_CLASS_NONE,
+        error_class: ERROR_CLASS_RETRIABLE,
+      };
+    }
+    // status 가 없으면 cause 기반 — AbortError(타임아웃) 또는 네트워크 에러.
+    if (isAbortError(err)) {
+      return {
+        result: DELIVERY_RESULT_TIMEOUT,
+        http_status_class: HTTP_STATUS_CLASS_NONE,
+        error_class: ERROR_CLASS_RETRIABLE,
+      };
+    }
+    return {
+      result: DELIVERY_RESULT_NETWORK_ERROR,
+      http_status_class: HTTP_STATUS_CLASS_NONE,
+      error_class: ERROR_CLASS_RETRIABLE,
+    };
+  }
+  // NonRetriableError + httpStatus → 3xx/4xx http_error.
+  if (err instanceof NonRetriableError) {
+    const status = err.httpStatus;
+    if (typeof status === "number") {
+      const cls = classifyHttpStatus(status);
+      return {
+        result: DELIVERY_RESULT_HTTP_ERROR,
+        http_status_class: cls ?? HTTP_STATUS_CLASS_NONE,
+        error_class: ERROR_CLASS_NON_RETRIABLE,
+      };
+    }
+    // DNS timeout 등 status 없는 NonRetriable — 보수적 network_error.
+    return {
+      result: DELIVERY_RESULT_NETWORK_ERROR,
+      http_status_class: HTTP_STATUS_CLASS_NONE,
+      error_class: ERROR_CLASS_NON_RETRIABLE,
+    };
+  }
+  // 분류되지 않은 예외(보수적) — network_error / RetriableError.
+  return {
+    result: DELIVERY_RESULT_NETWORK_ERROR,
+    http_status_class: HTTP_STATUS_CLASS_NONE,
+    error_class: ERROR_CLASS_RETRIABLE,
+  };
+}
+
+function classifyHttpStatus(status: number): HttpStatusClass | undefined {
+  if (status >= 200 && status < 300) return STATUS_CLASS_2XX;
+  if (status >= 300 && status < 400) return STATUS_CLASS_3XX;
+  if (status >= 400 && status < 500) return STATUS_CLASS_4XX;
+  if (status >= 500 && status < 600) return STATUS_CLASS_5XX;
+  return undefined;
+}
+
+function isSsrfBlockMessage(message: string): boolean {
+  return message.startsWith("Refusing to deliver");
+}
+
+function isAbortError(err: RetriableError): boolean {
+  const cause = (err as RetriableError & { cause?: unknown }).cause;
+  if (cause instanceof Error && cause.name === "AbortError") return true;
+  // classifyByCause 가 메시지에 "Delivery aborted (timeout)" 를 사용.
+  return err.message.toLowerCase().includes("aborted");
+}
+
+function recordDeliveryMetrics(labels: DeliveryLabels, durationMs: number): void {
+  const durationSec = durationMs / 1000;
+  deliveriesTotal.inc({
+    result: labels.result,
+    http_status_class: labels.http_status_class,
+    error_class: labels.error_class,
+  });
+  // W2 라벨은 result 만(PRD §3.3 W2). 다른 라벨은 W1 에서 분기 관찰.
+  deliveryDurationSeconds.observe({ result: labels.result }, durationSec);
 }
 
 /**
