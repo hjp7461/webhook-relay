@@ -36,3 +36,5 @@ export type {
   GracefulShutdownResult,
   ShutdownHttpServer,
 } from "./shutdown.js";
+
+export { getMetricsRegistry, enableDefaultMetrics } from "./metrics.js";
