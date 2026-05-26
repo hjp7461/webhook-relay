@@ -27,21 +27,21 @@ let metricsBaseUrl: string;
 // idle 상태 그대로 종료된다. 운영에서는 동일 시나리오에서 프로세스가
 // exit 하므로 영향 없음. 본 unhandled 는 테스트 결정성에 영향이 없으니
 // 명시적으로 swallow 한다(원인/조건은 본 주석 참조).
+//
+// 본 listener 는 module 로드 시점에 등록되어 vitest worker 프로세스
+// 전 lifecycle 을 cover 한다(afterAll 이후 cleanup 단계의 rejection 까지
+// 잡기 위함). 다른 unhandled 는 그대로 throw 되어 vitest 가 실패로 표기.
 function isBenignConnectionClosed(err: unknown): boolean {
-  return (
-    err instanceof Error && err.message === "Connection is closed."
-  );
+  return err instanceof Error && err.message === "Connection is closed.";
 }
 
-const benignHandler = (err: unknown): void => {
+process.on("unhandledRejection", (err: unknown): void => {
   if (!isBenignConnectionClosed(err)) {
-    // 다른 unhandled 는 그대로 throw → Vitest 가 실패로 표기.
     throw err;
   }
-};
+});
 
 beforeAll(async () => {
-  process.on("unhandledRejection", benignHandler);
   redis = await startRedisContainer();
 
   const queueName = `webhook-it-worker-${randomUUID()}`;
@@ -81,7 +81,6 @@ beforeAll(async () => {
 afterAll(async () => {
   if (built) await built.close();
   if (redis) await redis.stop();
-  process.removeListener("unhandledRejection", benignHandler);
 }, 60_000);
 
 describe("GET /metrics — SERVICE_MODE=worker mode", () => {
