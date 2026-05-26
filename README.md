@@ -23,7 +23,9 @@ pnpm install
 docker compose up
 # API: http://localhost:3000
 # 대시보드: http://localhost:3000/dashboard
-# Grafana: http://localhost:3001
+# 메트릭: http://localhost:3000/metrics (api), http://localhost:3001/metrics (worker)
+# Prometheus: http://localhost:9090
+# Grafana: http://localhost:3001 (admin/admin — 데모 기본값)
 ```
 
 기본 `docker compose up` 은 `api` 와 `worker` 를 각 1개, Redis 1개를 띄운다.
@@ -170,6 +172,17 @@ Producer ──add──> BullMQ Queue ──> Worker pool (수평 확장)
   회귀 가드한다. 결정론적 attempts 분포는 IT-OBS-6.S3/4/5 가 보장한다. Grafana
   `04-shutdown` 대시보드의 "attempts-per-job under stalled recovery" 노트 패널에서도 동일
   내용을 cross-link 한다.
+- **Grafana admin 기본값 변경(운영 노출 전 필수):** `docker-compose.yml` 의 `grafana`
+  서비스가 `GF_SECURITY_ADMIN_USER=admin` / `GF_SECURITY_ADMIN_PASSWORD=admin` 을 데모
+  기본값으로 둔다(Q-OBS-4 (a)). 운영 노출 전에 `.env` 또는 Docker secrets 로 강한 값을
+  주입하고, Grafana 컨테이너 재기동. 외부 노출이라면 추가로 reverse proxy 의 TLS + 별도
+  사용자 관리(SSO 등) 도입 권장.
+- **SLO 임계는 잠정값 — 4단계 실측 후 재조정:** 3단계 PRD(`prd-phase3/04`) 의 SLO 목표
+  숫자(가용성 99.5% / 등록 지연 p99 ≤ 0.5s / 전달 지연 p99 ≤ 5s / DLQ 비율 ≤ 1%)는
+  **잠정값**이며 운영 부하 측정 전에 채택한 값이다(Q-OBS-11). 4단계 PRD(부하 측정)에서
+  실측 분포를 본 뒤 재조정 가능. SLI PromQL 형태와 측정 윈도우(28d/7d/1d), burn rate
+  (14.4×/6×) 는 잠금된 패턴이므로 변경하지 않는다(I6.1, I6.2). alerting rule YAML 의
+  임계 숫자만 4단계에서 별도 PR 로 갱신.
 
 > 운영 전환 전에 검토할 항목 전체 목록은 `docs/architecture.md §5`의 "보장하지 않는다" 절
 > 참조.
