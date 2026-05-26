@@ -141,11 +141,15 @@ export async function buildServer(config: AppConfig): Promise<BuiltServer> {
 
   // handler 의 generic 은 unknown — 큐 페이로드는 핸들러 내부에서 zod 로 재검증.
   // M5: dlqQueue 주입 — core 가 종단 실패 시 새 항목을 적재.
+  // M6: STALLED_INTERVAL_MS / MAX_STALLED_COUNT 를 BullMQ Worker 옵션으로 위임
+  //     (PRD `02` §F2.5, Q-STALL-1 (a) — env 단일 채널).
   const worker = createWorker<WebhookJobData>(config.QUEUE_NAME, handler, {
     connection,
     workerOptions: {
       concurrency: config.WORKER_CONCURRENCY,
     },
+    stalledInterval: config.STALLED_INTERVAL_MS,
+    maxStalledCount: config.MAX_STALLED_COUNT,
     dlqQueue,
   });
 
