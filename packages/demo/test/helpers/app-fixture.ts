@@ -88,6 +88,9 @@ export async function startApp(opts: FixtureOptions): Promise<AppFixture> {
     // 통합 테스트는 buildServer() 를 직접 호출하므로 SERVICE_MODE 영향이 없지만,
     // AppConfig 타입이 필드를 요구하므로 명시적으로 'all' 을 부여한다.
     SERVICE_MODE: "all",
+    // worker 모드 전용 `/metrics` 포트(Q-OBS-3 (a)). 본 fixture 는 buildServer
+    // 만 사용하므로 영향이 없지만, AppConfig 가 필드를 요구하여 0 으로 둔다.
+    WORKER_METRICS_PORT: 0,
   };
 
   const server = await buildServer(config);

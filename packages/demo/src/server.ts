@@ -82,7 +82,12 @@ export interface BuiltApiServer {
 }
 
 /**
- * Worker 전용(BullMQ Worker 만) 빌드 결과. HTTP 가 없으므로 fastify/draining 미노출.
+ * Worker 전용(BullMQ Worker + `/metrics` HTTP) 빌드 결과.
+ *
+ * Q-OBS-3 (a): worker 모드도 최소 Fastify 인스턴스(`metricsApp`)에서
+ * `/metrics` 만 노출한다(`WORKER_METRICS_PORT`). 다른 라우트는 등록하지
+ * 않는다.
+ *
  * queue 는 워커가 동일 BullMQ 큐를 공유하기 위해 보유한다(client 측 옵션 적용 목적).
  */
 export interface BuiltWorkerServer {
@@ -90,6 +95,11 @@ export interface BuiltWorkerServer {
   readonly queue: Queue<WebhookJobData, void, string>;
   readonly dlqQueue: Queue<DlqJobData<WebhookJobData>, void, string>;
   readonly connection: Redis;
+  /**
+   * worker 모드에서 `/metrics` 만 노출하는 최소 Fastify 인스턴스.
+   * `main()` 이 `WORKER_METRICS_PORT` 에 listen 한다.
+   */
+  readonly metricsApp: FastifyInstance;
   close(): Promise<void>;
 }
 
@@ -427,12 +437,24 @@ export async function buildWorkerServer(config: AppConfig): Promise<BuiltWorkerS
     dlqQueue,
   });
 
+  // Q-OBS-3 (a): worker 모드도 최소 Fastify 인스턴스에 `/metrics` 만 등록.
+  // 다른 라우트(`/webhooks`, `/dashboard`, `/healthz`)는 등록하지 않는다.
+  const metricsApp = Fastify({
+    logger: { level: config.LOG_LEVEL },
+  });
+  await registerMetricsRoute(metricsApp);
+
   let closing = false;
   async function close(): Promise<void> {
     if (closing) return;
     closing = true;
     try {
       await worker.close();
+    } catch {
+      // best-effort
+    }
+    try {
+      await metricsApp.close();
     } catch {
       // best-effort
     }
@@ -458,6 +480,7 @@ export async function buildWorkerServer(config: AppConfig): Promise<BuiltWorkerS
     queue,
     dlqQueue,
     connection,
+    metricsApp,
     close,
   };
 }
@@ -599,9 +622,18 @@ async function runApiMode(config: AppConfig): Promise<void> {
 async function runWorkerMode(config: AppConfig): Promise<void> {
   const built = await buildWorkerServer(config);
 
-  // HTTP 없음. 진입 사실을 한 줄로 stdout 에 알린다(컴포즈 로그 가시성).
+  // Q-OBS-3 (a): worker 모드도 최소 Fastify HTTP 서버를 띄워 `/metrics` 만 노출.
+  const metricsAddress = await built.metricsApp.listen({
+    port: config.WORKER_METRICS_PORT,
+    host: "0.0.0.0",
+  });
   process.stdout.write(
-    `${JSON.stringify({ level: "info", msg: "worker started", mode: "worker" })}\n`,
+    `${JSON.stringify({
+      level: "info",
+      msg: "worker started",
+      mode: "worker",
+      metricsAddress,
+    })}\n`,
   );
 
   let shuttingDown = false;
@@ -612,7 +644,9 @@ async function runWorkerMode(config: AppConfig): Promise<void> {
       `${JSON.stringify({ level: "info", msg: "shutdown requested", signal })}\n`,
     );
 
-    // HTTP 가 없으므로 setDraining/close 는 no-op stub 으로 주입한다.
+    // worker 모드의 `/metrics` Fastify 도 gracefulShutdown 의 httpServer
+    // 인자에 편입한다. setDraining 은 no-op(`/metrics` 는 셧다운 중에도 200
+    // 유지 — Q-OBS-2 (a)).
     void gracefulShutdown({
       worker: built.worker,
       queue: built.queue,
@@ -620,10 +654,10 @@ async function runWorkerMode(config: AppConfig): Promise<void> {
       redis: built.connection,
       httpServer: {
         setDraining: (): void => {
-          // no-op: worker 모드는 HTTP 없음.
+          // no-op: `/metrics` 는 Q-OBS-2 (a) 에 따라 draining 무관 200 유지.
         },
         close: async (): Promise<void> => {
-          // no-op
+          await built.metricsApp.close();
         },
       },
       timeoutMs: config.SHUTDOWN_TIMEOUT_MS,

@@ -113,6 +113,12 @@ const ConfigEnvSchema = z.object({
   // 서비스 모드(api/worker 프로세스 분리). 기본값 'all' 은 단일 프로세스로
   // 동작하므로 기존 데모 흐름(IT-S7 자식 프로세스 포함)을 회귀시키지 않는다.
   SERVICE_MODE: ServiceModeSchema.default("all"),
+
+  // Q-OBS-3 (a) — SERVICE_MODE=worker 컨테이너도 최소 Fastify HTTP 서버를
+  // 띄워 `/metrics` 만 노출한다. 0 허용(테스트에서 OS 가 빈 포트 할당).
+  WORKER_METRICS_PORT: portIntFromString
+    .default(3001 as unknown as never)
+    .or(z.number().int().min(0).max(65535)),
 });
 
 export type AppConfig = z.infer<typeof ConfigEnvSchema>;
