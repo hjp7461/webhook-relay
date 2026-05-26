@@ -256,36 +256,40 @@
 | ✅ | **C-MET-8** | M-OBS-4 | `docker-compose.yml` worker 서비스에 `/metrics` 포트 노출 (Q-OBS-3 (a) 정합). |
 | ✅ | **C-MET-12** | M-OBS-4 | `docker/grafana/.gitkeep` 제거 (실제 파일이 들어오므로). |
 
-### 별도 PR 로 사용자 결정 위임 (13건, ❌)
+### 후속 commit 시리즈로 처리 완료 (13건, ✅ 2026-05-27)
 
-| 상태 | C-MET ID | 대상 문서 | 갱신 제안 | 위임 이유 |
-|------|----------|-----------|-----------|-----------|
-| ❌ | **C-MET-1** | `prd/04-architecture-boundaries.md` §7 표 | "메트릭 정의(정의만) — 실제 노출은 3단계" 줄을 "3단계 PRD에서 prom-client 도입 + 도메인 무관 메트릭 정의 + Registry 노출" 로 갱신 | PRD 갱신 — 별도 PR. |
-| ❌ | **C-MET-3** | `architecture.md` §5 | "Prometheus/Grafana 관측성(3단계 PRD)" 줄을 "보장한다" 로 이동 | 본 PLAN 완료 후 별도 PR. |
-| ❌ | **C-MET-4** | `prd/05-api-and-contracts.md` §4 또는 §6 | `GET /metrics` 명세 추가 또는 본 PRD `prd-phase3/02` 로 cross-link | 별도 PR. |
-| ❌ | **C-MET-5** | `prd/06-security-and-ops.md` §6.2 표 | `/metrics` 행 추가 (Q-OBS-2 (a) — 200 유지) | 별도 PR. |
-| ❌ | **C-MET-6** | `architecture.md` §2 컴포넌트 표 | "Metrics Endpoint" 행 추가 (`packages/demo/src/api/metrics.ts`) | 별도 PR. |
-| ❌ | **C-MET-9** | `README.md` 빠른 시작 | "Prometheus: http://localhost:9090" 추가 | 별도 PR. |
-| ❌ | **C-MET-10** | `README.md` 운영 노트 | "Grafana admin 기본값 변경" 항목 추가 | 별도 PR. |
-| ❌ | **C-MET-11** | `architecture.md` §2 컴포넌트 표 | "Prometheus" / "Grafana" 행 추가 | 별도 PR. |
-| ❌ | **C-MET-13** | `architecture.md` §5 "보장한다" | SLO-1~4 항목 추가 | PLAN 완료 후 별도 PR. |
-| ❌ | **C-MET-14** | `prd/06-security-and-ops.md` 운영 노트 | "알람 라우팅·온콜은 본 PRD 범위 밖" 명시 | 별도 PR. |
-| ❌ | **C-MET-15** | `README.md` 운영 노트 | "SLO 임계는 잠정값이며 4단계 실측 후 재조정" 명시 | 별도 PR. |
-| ❌ | **C-MET-16** | `CLAUDE.md` §3 폴더 구조 | `docker/prometheus/rules/` 추가 명시 | **CLAUDE.md 수정**은 본 PLAN 범위 밖. 사용자 결정 후 별도 PR. |
-| ❌ | **C-MET-17** | `prd/03-test-strategy.md` 또는 새 phase3 test-strategy | IT-OBS-1~12 시나리오 정의 | 별도 PR. |
+> **본 저장소는 main 직접 작업 + push 패턴 (단독 개발)** 이라 위임 표현인 "별도 PR" 은
+> 본 저장소에서 "별도 commit 시리즈" 로 읽는다. M-OBS-6 종료 후 commit 시리즈
+> `d624154`~`b0bb9e5` (7 commits) 에서 모두 정착.
+
+| 상태 | C-MET ID | 대상 문서 | 갱신 제안 | 처리 commit |
+|------|----------|-----------|-----------|-------------|
+| ✅ | **C-MET-1** | `prd/04-architecture-boundaries.md` §7 표 | "메트릭 정의(정의만) — 실제 노출은 3단계" 줄을 "3단계 PRD에서 prom-client 도입 + 도메인 무관 메트릭 정의 + Registry 노출" 로 갱신 | `3417733` docs(prd/04) |
+| ✅ | **C-MET-3** | `architecture.md` §5 | "Prometheus/Grafana 관측성(3단계 PRD)" 줄을 "보장한다" 로 이동 | `d624154` docs(architecture) |
+| ✅ | **C-MET-4** | `prd/05-api-and-contracts.md` §4 또는 §6 | `GET /metrics` 명세 추가 또는 본 PRD `prd-phase3/02` 로 cross-link | `2c266d2` docs(prd/05) §6.1 cross-link |
+| ✅ | **C-MET-5** | `prd/06-security-and-ops.md` §6.2 표 | `/metrics` 행 추가 (Q-OBS-2 (a) — 200 유지) | `d8318e8` docs(prd/06) |
+| ✅ | **C-MET-6** | `architecture.md` §2 컴포넌트 표 | "Metrics Endpoint" 행 추가 (`packages/demo/src/api/metrics.ts`) | `d624154` docs(architecture) |
+| ✅ | **C-MET-9** | `README.md` 빠른 시작 | "Prometheus: http://localhost:9090" 추가 | `ba28f6b` docs(readme) |
+| ✅ | **C-MET-10** | `README.md` 운영 노트 | "Grafana admin 기본값 변경" 항목 추가 | `ba28f6b` docs(readme) |
+| ✅ | **C-MET-11** | `architecture.md` §2 컴포넌트 표 | "Prometheus" / "Grafana" 행 추가 | `d624154` docs(architecture) |
+| ✅ | **C-MET-13** | `architecture.md` §5 "보장한다" | SLO-1~4 항목 추가 | `d624154` docs(architecture) |
+| ✅ | **C-MET-14** | `prd/06-security-and-ops.md` 운영 노트 | "알람 라우팅·온콜은 본 PRD 범위 밖" 명시 | `d8318e8` docs(prd/06) §12.1 |
+| ✅ | **C-MET-15** | `README.md` 운영 노트 | "SLO 임계는 잠정값이며 4단계 실측 후 재조정" 명시 | `ba28f6b` docs(readme) |
+| ✅ | **C-MET-16** | `CLAUDE.md` §3 폴더 구조 | `docker/prometheus/rules/` 추가 명시 | `05604d6` docs(claude) |
+| ✅ | **C-MET-17** | `prd/03-test-strategy.md` 또는 새 phase3 test-strategy | IT-OBS-1~12 시나리오 정의 | `b0bb9e5` docs(prd/03) §5.1 |
 
 > PLAN `07-m-obs-6-refinement.md` §10 의 표가 본 §8 의 단일 출처 짝이며,
 > 두 표는 글자 단위로 일치한다(M-OBS-6 잠금 시점 기준).
 
-### 본 PLAN 완료 후 권장 PR 순서
+### 본 PLAN 완료 후 처리 순서 (2026-05-27 적용 완료)
 
-1. **C-MET-1, C-MET-6, C-MET-11** — architecture.md 컴포넌트 표/PRD §7 표 갱신
-   (M-OBS-1 직후라도 가능, 본 PLAN 완료 후가 자연스러움).
-2. **C-MET-3, C-MET-13** — architecture.md §5 "보장한다" 절 갱신 (본 PLAN 완료
-   후).
-3. **C-MET-4, C-MET-5** — PRD `05`/`06` 의 라우트/셧다운 표 갱신.
-4. **C-MET-9, C-MET-10, C-MET-14, C-MET-15** — README 갱신 (운영 노트 + 빠른
-   시작).
-5. **C-MET-16** — CLAUDE.md §3 폴더 구조 갱신.
-6. **C-MET-17** — PRD `03-test-strategy.md` 또는 신규 phase3 test-strategy
-   문서.
+위 권장 순서대로 main 직접 commit 시리즈로 처리됨 — 모든 C-MET 13건이 ✅. 처리
+순서:
+
+1. **C-MET-3, 6, 11, 13** — `d624154` docs(architecture).
+2. **C-MET-1** — `3417733` docs(prd/04).
+3. **C-MET-4** — `2c266d2` docs(prd/05) §6.1.
+4. **C-MET-5, 14** — `d8318e8` docs(prd/06).
+5. **C-MET-9, 10, 15** — `ba28f6b` docs(readme).
+6. **C-MET-16** — `05604d6` docs(claude).
+7. **C-MET-17** — `b0bb9e5` docs(prd/03) §5.1.
