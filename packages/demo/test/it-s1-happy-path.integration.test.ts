@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { randomUUID } from "node:crypto";
 import { startRedisContainer, type StartedRedis } from "./helpers/redis-container.js";
 import { pollUntil, startApp, type AppFixture } from "./helpers/app-fixture.js";
 
@@ -30,6 +31,8 @@ describe("IT-S1 happy path", () => {
   it("POST /webhooks → 202 + jobId → worker delivers to /_demo/receiver", async () => {
     const targetUrl = `${app.baseUrl}/_demo/receiver`;
     const payload = { event: "user.created", id: 42 };
+    // M3 에서 idempotencyKey 는 필수. 테스트 격리를 위해 고유 키.
+    const idempotencyKey = `it-s1-${randomUUID()}`;
 
     const res = await fetch(`${app.baseUrl}/webhooks`, {
       method: "POST",
@@ -37,7 +40,7 @@ describe("IT-S1 happy path", () => {
         "content-type": "application/json",
         authorization: `Bearer ${app.bearerToken}`,
       },
-      body: JSON.stringify({ url: targetUrl, payload }),
+      body: JSON.stringify({ url: targetUrl, payload, idempotencyKey }),
     });
 
     expect(res.status).toBe(202);
