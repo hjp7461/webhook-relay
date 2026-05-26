@@ -1,7 +1,9 @@
 # PLAN `03` §4-17. 단순화 위해 빌드 산출물 대신 tsx 로 직접 실행.
-# Node 20-alpine 베이스(PLAN 명시). alpine 에서 빌드 이슈 발생 시 node:20-slim 으로
-# 후속 조정 가능.
-FROM node:20-alpine AS base
+# 베이스 결정 변동: PLAN 은 node:20-alpine 을 권장했으나, 본 저장소의 pnpm 11.3.0
+# 은 Node 20 에서 import 실패(ERR_UNKNOWN_BUILTIN_MODULE)한다. CLAUDE.md §2 가
+# 요구하는 "Node.js 20+ LTS" 범위 내에서 호환 가능한 22-alpine 으로 격상한다
+# (Node 22 도 LTS). 본 변경은 보고서에 기재됨.
+FROM node:22-alpine AS base
 
 # pnpm 활성화(corepack).
 RUN corepack enable && corepack prepare pnpm@11.3.0 --activate
