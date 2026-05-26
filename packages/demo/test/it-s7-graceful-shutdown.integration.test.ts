@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
+import { createServer as createNetServer, type AddressInfo } from "node:net";
 import { Queue } from "bullmq";
 import { Redis } from "ioredis";
 import { startRedisContainer, type StartedRedis } from "./helpers/redis-container.js";
@@ -93,6 +93,25 @@ async function startStubReceiver(): Promise<StubReceiver> {
   };
 }
 
+/**
+ * OS 에서 빈 TCP 포트 하나를 잡고 즉시 해제하여 그 번호를 반환한다.
+ * config Zod 가 PORT 를 positive integer 로만 허용하므로(0 미허용) 자식 프로세스에
+ * 동적 포트를 명시 전달하기 위한 우회. close→listen 사이의 race window 가 작지만
+ * 테스트 격리 환경에서 충분히 안전.
+ */
+async function pickFreePort(): Promise<number> {
+  return new Promise<number>((resolve, reject) => {
+    const srv = createNetServer();
+    srv.unref();
+    srv.on("error", reject);
+    srv.listen(0, "127.0.0.1", () => {
+      const addr = srv.address() as AddressInfo;
+      const port = addr.port;
+      srv.close(() => resolve(port));
+    });
+  });
+}
+
 async function waitFor(
   fn: () => Promise<boolean> | boolean,
   options: { intervalMs?: number; timeoutMs?: number } = {},
@@ -115,13 +134,14 @@ function buildChildEnv(input: {
   dlqName: string;
   bearerToken: string;
   hmacSecret: string;
+  port: number;
 }): NodeJS.ProcessEnv {
   return {
     // 자식 프로세스가 부트스트랩에 사용할 env. 시크릿은 32 bytes 이상.
     PATH: process.env["PATH"] ?? "",
     NODE_ENV: "test",
     REDIS_URL: input.redisUrl,
-    PORT: "0",
+    PORT: String(input.port),
     LOG_LEVEL: "info",
     QUEUE_NAME: input.queueName,
     DLQ_NAME: input.dlqName,
@@ -171,12 +191,14 @@ describe("IT-S7 graceful shutdown", () => {
     const dlqName = `${queueName}-dlq`;
     const bearerToken = "a".repeat(32);
     const hmacSecret = "h".repeat(32);
+    const port = await pickFreePort();
     const env = buildChildEnv({
       redisUrl: redis.url,
       queueName,
       dlqName,
       bearerToken,
       hmacSecret,
+      port,
     });
 
     let server: SpawnedServer | undefined;
@@ -286,12 +308,14 @@ describe("IT-S7 graceful shutdown", () => {
     const dlqName = `${queueName}-dlq`;
     const bearerToken = "b".repeat(32);
     const hmacSecret = "h".repeat(32);
+    const port = await pickFreePort();
     const env = buildChildEnv({
       redisUrl: redis.url,
       queueName,
       dlqName,
       bearerToken,
       hmacSecret,
+      port,
     });
 
     let server: SpawnedServer | undefined;

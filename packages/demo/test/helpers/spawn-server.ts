@@ -1,7 +1,8 @@
 import { spawn, type ChildProcessByStdio } from "node:child_process";
 import type { Readable } from "node:stream";
 import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { createRequire } from "node:module";
 
 // IT-S7 전용 자식 프로세스 spawn 헬퍼.
 //
@@ -20,6 +21,13 @@ import { fileURLToPath } from "node:url";
 const HERE = dirname(fileURLToPath(import.meta.url));
 // packages/demo/test/helpers → packages/demo/src/server.ts
 const SERVER_ENTRY = resolve(HERE, "..", "..", "src", "server.ts");
+
+// pnpm workspace 에서 tsx 는 packages/demo/node_modules/tsx 에 심볼릭
+// 링크되어 있다. 자식 프로세스가 어느 cwd 에서 시작해도 안정적으로 로더를
+// 찾도록, 본 헬퍼가 직접 절대 경로를 resolve 해 file:// URL 로 --import 에
+// 전달한다(상대 패키지 이름 "tsx" 가 자식 프로세스 cwd 에서 못 찾을 가능성 차단).
+const requireFromHere = createRequire(import.meta.url);
+const TSX_LOADER_URL = pathToFileURL(requireFromHere.resolve("tsx")).href;
 
 export interface SpawnedServer {
   readonly child: ChildProcessByStdio<null, Readable, Readable>;
@@ -53,7 +61,7 @@ export async function spawnServer(opts: SpawnServerOptions): Promise<SpawnedServ
   const readyTimeoutMs = opts.readyTimeoutMs ?? 8_000;
   const child = spawn(
     process.execPath,
-    ["--import", "tsx", SERVER_ENTRY],
+    ["--import", TSX_LOADER_URL, SERVER_ENTRY],
     {
       env: opts.env,
       stdio: ["ignore", "pipe", "pipe"],
