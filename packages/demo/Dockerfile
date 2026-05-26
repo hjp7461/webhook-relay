@@ -10,6 +10,13 @@ RUN corepack enable && corepack prepare pnpm@11.3.0 --activate
 
 WORKDIR /app
 
+# C11 build_info — 빌드 시점에 git commit 해시를 ARG 로 주입한 뒤 런타임 env
+# 로 노출한다(M-OBS-2 의 publishBuildInfoOnce 가 process.env.GIT_COMMIT 를 읽음).
+# docker-compose.yml 의 build.args.GIT_COMMIT 가 본 ARG 를 채운다.
+# 빈 값일 경우(`GIT_COMMIT=` 또는 부재) 기본값 "unknown" 으로 fallback.
+ARG GIT_COMMIT=unknown
+ENV GIT_COMMIT=$GIT_COMMIT
+
 # 워크스페이스 메타. lockfile 까지 함께 복사해야 frozen install 이 가능.
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json tsconfig.base.json tsconfig.json ./
 COPY packages/core/package.json packages/core/tsconfig.json packages/core/

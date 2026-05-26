@@ -23,6 +23,11 @@ services:
     build:
       context: .
       dockerfile: packages/demo/Dockerfile
+      args:
+        # C11 build_info 의 git_commit 라벨. 호스트 셸에서
+        # `GIT_COMMIT=$(git rev-parse HEAD) docker compose build` 로 주입.
+        # 부재 시 "unknown" 으로 fallback (운영자가 잊어도 빌드는 통과).
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
     container_name: webhook-relay-api
     depends_on:
       redis:
@@ -61,6 +66,9 @@ services:
     build:
       context: .
       dockerfile: packages/demo/Dockerfile
+      args:
+        # C11 build_info 의 git_commit 라벨. api 와 동일 값.
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
     depends_on:
       redis:
         condition: service_healthy
