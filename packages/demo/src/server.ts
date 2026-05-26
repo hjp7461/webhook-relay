@@ -25,6 +25,7 @@ import { registerHealthzRoute } from "./api/healthz.js";
 import { registerMetricsRoute } from "./api/metrics.js";
 import { registerApiMetricsPlugin } from "./api/metrics-plugin.js";
 import { createWebhookDeliveryHandler } from "./handlers/webhook-delivery.js";
+import { attachW3Wiring } from "./handlers/wire-w3.js";
 import type { WebhookJobData } from "./domain/schemas.js";
 import {
   DLQ_NAME as CONSTANT_DLQ_NAME,
@@ -305,6 +306,9 @@ export async function buildServer(config: AppConfig): Promise<BuiltServer> {
     dlqQueue,
   });
 
+  // M-OBS-3 W3 — Worker 'completed' / 'failed' 이벤트에서 attempts 분포 관찰.
+  attachW3Wiring(worker);
+
   const facade = makeFacade(queue);
 
   let closing = false;
@@ -470,6 +474,9 @@ export async function buildWorkerServer(config: AppConfig): Promise<BuiltWorkerS
     maxStalledCount: config.MAX_STALLED_COUNT,
     dlqQueue,
   });
+
+  // M-OBS-3 W3 — Worker 'completed' / 'failed' 이벤트에서 attempts 분포 관찰.
+  attachW3Wiring(worker);
 
   // Q-OBS-3 (a): worker 모드도 최소 Fastify 인스턴스에 `/metrics` 만 등록.
   // 다른 라우트(`/webhooks`, `/dashboard`, `/healthz`)는 등록하지 않는다.
