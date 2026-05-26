@@ -37,4 +37,5 @@ export type {
   ShutdownHttpServer,
 } from "./shutdown.js";
 
-export { getMetricsRegistry, enableDefaultMetrics } from "./metrics.js";
+export { getMetricsRegistry, enableDefaultMetrics, setBuildInfo } from "./metrics.js";
+export type { BuildInfoLabels } from "./metrics.js";

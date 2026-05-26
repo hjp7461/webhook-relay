@@ -6,6 +6,7 @@ import {
   createQueue,
   createWorker,
   gracefulShutdown,
+  setBuildInfo,
   type CoreJobHandler,
   type DlqJobData,
 } from "@webhook-relay/core";
@@ -133,6 +134,26 @@ function assertQueueNameConsistency(config: AppConfig): void {
   }
 }
 
+/**
+ * C11 build_info 라벨 값을 환경에서 수집한다.
+ *
+ * - version: `process.env.npm_package_version` 또는 `BUILD_VERSION` env. 둘 다
+ *   부재 시 "unknown".
+ * - commit: `process.env.GIT_COMMIT` 또는 `BUILD_COMMIT` env. 부재 시 "unknown".
+ * - nodeVersion: `process.version`.
+ *
+ * 부트스트랩에서 1회 호출. 시크릿/페이로드는 라벨에 포함되지 않는다(PRD §10 I3.3).
+ */
+function publishBuildInfoOnce(): void {
+  const version =
+    process.env.npm_package_version ??
+    process.env.BUILD_VERSION ??
+    "unknown";
+  const commit = process.env.GIT_COMMIT ?? process.env.BUILD_COMMIT ?? "unknown";
+  const nodeVersion = process.version;
+  setBuildInfo({ version, commit, nodeVersion });
+}
+
 // 공통 helper — Redis 연결 생성.
 function createConnectionFromConfig(config: AppConfig): Redis {
   return createConnection({
@@ -215,6 +236,8 @@ function makeFacade(queue: Queue<WebhookJobData, void, string>): QueueFacade {
 
 export async function buildServer(config: AppConfig): Promise<BuiltServer> {
   assertQueueNameConsistency(config);
+  // M-OBS-2 C11 — build_info 라벨을 부트스트랩에서 1회 노출.
+  publishBuildInfoOnce();
 
   const connection = createConnectionFromConfig(config);
   const queue = createMainQueue(config, connection);
@@ -331,6 +354,8 @@ export async function buildServer(config: AppConfig): Promise<BuiltServer> {
  */
 export async function buildApiServer(config: AppConfig): Promise<BuiltApiServer> {
   assertQueueNameConsistency(config);
+  // M-OBS-2 C11 — build_info 라벨을 부트스트랩에서 1회 노출.
+  publishBuildInfoOnce();
 
   const connection = createConnectionFromConfig(config);
   const queue = createMainQueue(config, connection);
@@ -408,6 +433,8 @@ export async function buildApiServer(config: AppConfig): Promise<BuiltApiServer>
  */
 export async function buildWorkerServer(config: AppConfig): Promise<BuiltWorkerServer> {
   assertQueueNameConsistency(config);
+  // M-OBS-2 C11 — build_info 라벨을 부트스트랩에서 1회 노출.
+  publishBuildInfoOnce();
 
   const connection = createConnectionFromConfig(config);
   const queue = createMainQueue(config, connection);

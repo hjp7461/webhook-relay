@@ -225,3 +225,26 @@ export function setShutdownState(next: ShutdownState): void {
     shutdownState.set({ [LABEL_STATE]: stateName }, stateName === next ? 1 : 0);
   }
 }
+
+/**
+ * C11 build_info set helper — 부트스트랩 시점에 1회 호출.
+ *
+ * 메트릭 정의는 `core` 가 담당하나(도메인 무관), 값은 호출 측(데모/운영
+ * 부트스트랩)이 주입한다(PLAN `03` §4 단계 7).
+ */
+export interface BuildInfoLabels {
+  readonly version: string;
+  readonly commit: string;
+  readonly nodeVersion: string;
+}
+
+export function setBuildInfo(labels: BuildInfoLabels): void {
+  buildInfo.set(
+    {
+      [LABEL_VERSION]: labels.version,
+      [LABEL_COMMIT]: labels.commit,
+      [LABEL_NODE_VERSION]: labels.nodeVersion,
+    },
+    1,
+  );
+}
