@@ -9,4 +9,11 @@ export type { ConnectionOptions, CreateQueueOptions } from "./queue.js";
 export { createWorker } from "./worker.js";
 export type { CoreJob, CoreJobHandler, CreateWorkerOptions } from "./worker.js";
 
+export { addJob } from "./producer.js";
+export type {
+  AddJobOptions,
+  AddJobResult,
+  QueueAddCapable,
+} from "./producer.js";
+
 export { RetriableError, NonRetriableError } from "./errors.js";
