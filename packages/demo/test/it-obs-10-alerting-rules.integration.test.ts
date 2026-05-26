@@ -379,12 +379,18 @@ describe("IT-OBS-10 alerting rule YAML validity + catalog alignment", () => {
             `annotations.summary missing in alert block:\n${block}`,
           ).toBe(true);
           // runbook_url 가 있다면 빈 문자열이어야 한다(PRD `04` §5.2.1).
-          const runbookMatch = block.match(/^\s*runbook_url\s*:\s*(.*)$/m);
+          // 정규식이 quoted 값 또는 빈 RHS 만 캡쳐하고, 라인 끝의 YAML 인라인
+          // 주석(`# ...`)은 비-캡쳐 그룹으로 허용한다 — PRD 본문이
+          // `runbook_url: ""  # 본 PRD 범위 밖 — 운영 PRD에서 작성` 형태이기
+          // 때문(글자 단위 정합 보존).
+          const runbookMatch = block.match(
+            /^\s*runbook_url\s*:\s*(""|''|)\s*(?:#.*)?$/m,
+          );
           if (runbookMatch) {
-            const rhs = runbookMatch[1]!.trim();
+            const rhs = runbookMatch[1]!;
             expect(
               rhs === '""' || rhs === "''" || rhs === "",
-              `runbook_url must be empty string, got: ${rhs}`,
+              `runbook_url must be empty string, got: ${JSON.stringify(rhs)}`,
             ).toBe(true);
           }
         }
