@@ -89,6 +89,8 @@ stalled-job 회수)는 본 단계가 아니라 [`02-resilience.md`](./02-resilie
 | **신뢰성** | 1단계 해피패스에서도 워커가 떠 있는 한 작업이 유실되지 않아야 함 (장애 복구는 2단계). |
 | **타입 안전성** | `strict: true`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`. `any` 금지. |
 
+> 이후 보강(`SERVICE_MODE` env, README §운영 노트): 단일 프로세스는 데모/MVP 기본값(`SERVICE_MODE=all`)이며, 운영에서는 `api` 와 `worker` 를 분리해 워커만 수평 확장 가능. PRD 본문의 다른 결정은 그대로다.
+
 ## 7. 수용 기준 (Acceptance Criteria)
 
 - **AC1.1** `pnpm install && docker compose up` 후, `curl -X POST http://localhost:3000/webhooks -d '{ "url": "http://localhost:3000/_demo/receiver", "payload": {"k":"v"} }'`을 실행하면 `202`와 `jobId`를 받는다.
