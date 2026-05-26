@@ -27,14 +27,17 @@ export function createWebhookDeliveryHandler(
     // 경계 재검증(Redis 페이로드는 unknown 으로 취급).
     const data: WebhookJobData = WebhookJobDataSchema.parse(job.data);
 
+    // M3: BullMQ jobId == idempotencyKey (api/webhooks.ts 에서 그렇게 적재).
+    // PRD `05` §9 — 2단계부터 idempotencyKey 는 구조화 로그 필수 컨텍스트.
+    // `data.idempotencyKey` 도 동일 값이지만, BullMQ 가 보장하는 식별자인
+    // `job.id` 를 단일 출처로 사용한다(중복 적재 흡수 후에도 동일).
+    const idempotencyKey = job.id;
     const baseCtx: Record<string, unknown> = {
       jobId: job.id,
+      idempotencyKey,
       attempt: job.attemptsMade + 1,
       queueName: deps.queueName,
     };
-    if (data.idempotencyKey !== undefined) {
-      baseCtx["idempotencyKey"] = data.idempotencyKey;
-    }
 
     deps.log("info", "webhook delivery started", baseCtx);
 
