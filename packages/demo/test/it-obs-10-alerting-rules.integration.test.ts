@@ -379,10 +379,9 @@ describe("IT-OBS-10 alerting rule YAML validity + catalog alignment", () => {
             `annotations.summary missing in alert block:\n${block}`,
           ).toBe(true);
           // runbook_url 가 있다면 빈 문자열이어야 한다(PRD `04` §5.2.1).
-          // YAML 인라인 주석(`# ...`) 제거 후 비교.
           const runbookMatch = block.match(/^\s*runbook_url\s*:\s*(.*)$/m);
           if (runbookMatch) {
-            const rhs = runbookMatch[1]!.replace(/\s+#.*$/, "").trim();
+            const rhs = runbookMatch[1]!.trim();
             expect(
               rhs === '""' || rhs === "''" || rhs === "",
               `runbook_url must be empty string, got: ${rhs}`,
