@@ -20,6 +20,10 @@ export interface FixtureOptions {
   readonly bearerToken?: string;
   readonly hmacSecret?: string;
   readonly allowPrivateTargets?: boolean;
+  /** 워커 재시도 정책. 기본 1(M2 호환 — 재시도 없음). */
+  readonly maxAttempts?: number;
+  /** 백오프 base ms. M4 의 IT-S3 는 짧은 base 로 wall-clock 안정화. */
+  readonly backoffBaseMs?: number;
 }
 
 export async function startApp(opts: FixtureOptions): Promise<AppFixture> {
@@ -32,8 +36,8 @@ export async function startApp(opts: FixtureOptions): Promise<AppFixture> {
     LOG_LEVEL: "warn",
     WEBHOOK_MAX_PAYLOAD_BYTES: 65536,
     WEBHOOK_DELIVERY_TIMEOUT_MS: 5_000,
-    WEBHOOK_MAX_ATTEMPTS: 1,
-    WEBHOOK_BACKOFF_BASE_MS: 1000,
+    WEBHOOK_MAX_ATTEMPTS: opts.maxAttempts ?? 1,
+    WEBHOOK_BACKOFF_BASE_MS: opts.backoffBaseMs ?? 1000,
     WEBHOOK_HMAC_SECRET: hmacSecret,
     WEBHOOK_HMAC_HEADER: "X-Webhook-Signature",
     QUEUE_NAME: queueName,
