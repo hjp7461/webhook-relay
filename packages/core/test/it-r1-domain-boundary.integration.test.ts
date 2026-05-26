@@ -56,12 +56,12 @@ function splitCamelCase(token: string): string[] {
   // 언더스코어 prefix("_demo" 같은) 보존.
   const underscorePrefix = token.match(/^(_+)/);
   if (underscorePrefix !== null) {
-    const prefix = underscorePrefix[1];
+    const prefix = underscorePrefix[1] ?? "";
     const rest = token.slice(prefix.length);
     if (rest.length === 0) return [token];
     const firstWordMatch = rest.match(/^([A-Za-z0-9]+)/);
     if (firstWordMatch !== null) {
-      const firstWord = firstWordMatch[1];
+      const firstWord = firstWordMatch[1] ?? "";
       const remainder = rest.slice(firstWord.length);
       const head = prefix + firstWord;
       const tailParts =
