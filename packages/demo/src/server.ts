@@ -438,23 +438,45 @@ export async function buildWorkerServer(config: AppConfig): Promise<BuiltWorkerS
 }
 
 /**
- * 프로세스 진입점. process.env 를 파싱하고 서버를 띄운다.
+ * 프로세스 진입점. process.env 를 파싱하고 SERVICE_MODE 에 따라 디스패치한다.
  *
  * 시그널 처리(M7, Q-SEC-4 (b), Q-OPS-2 (b)):
  *  - SIGTERM/SIGINT 수신 시 core.gracefulShutdown(...) 을 호출한다.
  *  - boolean guard 로 중복 수신 방지(두 번째 이후 시그널은 무시).
  *  - 결과의 timedOut 에 따라 process.exit(0|1).
  *  - 타임아웃 시 잔여 작업 ID 를 구조화 JSON 한 줄로 출력(remainingJobIds 키).
+ *
+ * SERVICE_MODE 별 분기:
+ *  - 'all'    — buildServer + listen + worker/queue/dlqQueue 셧다운(기존 흐름,
+ *               IT-S7 자식 호환).
+ *  - 'api'    — buildApiServer + listen + queue/dlqQueue 셧다운(워커 없음).
+ *  - 'worker' — buildWorkerServer + 시그널만 + worker/queue/dlqQueue 셧다운
+ *               (HTTP 없음).
  */
 export async function main(): Promise<void> {
   const config = loadConfigFromProcessEnv();
+
+  if (config.SERVICE_MODE === "api") {
+    await runApiMode(config);
+    return;
+  }
+  if (config.SERVICE_MODE === "worker") {
+    await runWorkerMode(config);
+    return;
+  }
+  await runAllMode(config);
+}
+
+async function runAllMode(config: AppConfig): Promise<void> {
   const built = await buildServer(config);
 
   const address = await built.fastify.listen({
     port: config.PORT,
     host: "0.0.0.0",
   });
-  built.fastify.log.info({ address }, "server listening");
+  // IT-S7 의 spawn-server.ts 는 "server listening" 메시지와 address 키만 본다.
+  // mode 키 추가는 회귀하지 않는다.
+  built.fastify.log.info({ mode: "all", address }, "server listening");
 
   let shuttingDown = false;
   const handleSignal = (signal: NodeJS.Signals): void => {
@@ -498,6 +520,107 @@ export async function main(): Promise<void> {
         // 안전망으로 1 로 종료.
         const msg = err instanceof Error ? err.message : String(err);
         built.fastify.log.error({ err: msg }, "shutdown error");
+        process.exit(1);
+      });
+  };
+
+  process.on("SIGTERM", () => handleSignal("SIGTERM"));
+  process.on("SIGINT", () => handleSignal("SIGINT"));
+}
+
+async function runApiMode(config: AppConfig): Promise<void> {
+  const built = await buildApiServer(config);
+
+  const address = await built.fastify.listen({
+    port: config.PORT,
+    host: "0.0.0.0",
+  });
+  built.fastify.log.info({ mode: "api", address }, "server listening");
+
+  let shuttingDown = false;
+  const handleSignal = (signal: NodeJS.Signals): void => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    built.fastify.log.info({ signal }, "shutdown requested");
+
+    // API 모드는 워커가 없으므로 worker/onTimeout 인자를 생략한다.
+    // gracefulShutdown 은 worker 부재 시 race 단계를 skip 한다(core/shutdown.ts).
+    void gracefulShutdown({
+      queue: built.queue.raw,
+      dlqQueue: built.dlqQueue,
+      redis: built.connection,
+      httpServer: {
+        setDraining: (v: boolean): void => built.setDraining(v),
+        close: async (): Promise<void> => {
+          await built.fastify.close();
+        },
+      },
+      timeoutMs: config.SHUTDOWN_TIMEOUT_MS,
+    })
+      .then((result) => {
+        process.exit(result.timedOut ? 1 : 0);
+      })
+      .catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        built.fastify.log.error({ err: msg }, "shutdown error");
+        process.exit(1);
+      });
+  };
+
+  process.on("SIGTERM", () => handleSignal("SIGTERM"));
+  process.on("SIGINT", () => handleSignal("SIGINT"));
+}
+
+async function runWorkerMode(config: AppConfig): Promise<void> {
+  const built = await buildWorkerServer(config);
+
+  // HTTP 없음. 진입 사실을 한 줄로 stdout 에 알린다(컴포즈 로그 가시성).
+  process.stdout.write(
+    `${JSON.stringify({ level: "info", msg: "worker started", mode: "worker" })}\n`,
+  );
+
+  let shuttingDown = false;
+  const handleSignal = (signal: NodeJS.Signals): void => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    process.stdout.write(
+      `${JSON.stringify({ level: "info", msg: "shutdown requested", signal })}\n`,
+    );
+
+    // HTTP 가 없으므로 setDraining/close 는 no-op stub 으로 주입한다.
+    void gracefulShutdown({
+      worker: built.worker,
+      queue: built.queue,
+      dlqQueue: built.dlqQueue,
+      redis: built.connection,
+      httpServer: {
+        setDraining: (): void => {
+          // no-op: worker 모드는 HTTP 없음.
+        },
+        close: async (): Promise<void> => {
+          // no-op
+        },
+      },
+      timeoutMs: config.SHUTDOWN_TIMEOUT_MS,
+      onTimeout: (remainingJobIds: string[]): void => {
+        process.stdout.write(
+          `${JSON.stringify({
+            level: "warn",
+            msg: "shutdown timeout reached; remaining active jobs",
+            remainingJobIds,
+            signal,
+          })}\n`,
+        );
+      },
+    })
+      .then((result) => {
+        process.exit(result.timedOut ? 1 : 0);
+      })
+      .catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        process.stderr.write(
+          `${JSON.stringify({ level: "error", msg: "shutdown error", err: msg })}\n`,
+        );
         process.exit(1);
       });
   };
