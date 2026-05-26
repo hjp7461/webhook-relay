@@ -1,0 +1,14 @@
+# M1 골격. 본 단계에서는 Redis 한 개만 띄운다.
+# 앱 서비스(api, worker)는 M2 진입 시 추가한다 — PLAN 02 §4-9.
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: webhook-relay-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
