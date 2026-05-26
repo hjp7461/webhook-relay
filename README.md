@@ -163,6 +163,13 @@ Producer ──add──> BullMQ Queue ──> Worker pool (수평 확장)
 - **`removeOnComplete` 정책:** 완료 작업은 Redis 메모리 누적 방지를 위해 일정 개수/시간
   뒤 자동 제거. 본 저장소는 `count: 1000`, `age: 86400s`로 설정(`packages/demo/src/constants.ts`).
   관측성 요구가 강하다면 3단계 PRD에서 보관 기간을 늘리거나 별도 저장소로 옮길 수 있음.
+- **BullMQ stalled recovery 와 attempts-per-job 메트릭:** 워커 강제 종료(IT-S6) 등으로
+  BullMQ 의 stalled recovery 가 발화하면, 회수된 작업의 `attemptsMade` 가 증분되지 않는
+  시맨틱(BullMQ 5.x) 때문에 `webhook_relay_delivery_attempts_per_job` 히스토그램이 해당
+  작업에 대해 `+Inf` 버킷에 집계된다. IT-OBS-6.S6 가 이 동작을 +Inf 1건 단언으로 약화하여
+  회귀 가드한다. 결정론적 attempts 분포는 IT-OBS-6.S3/4/5 가 보장한다. Grafana
+  `04-shutdown` 대시보드의 "attempts-per-job under stalled recovery" 노트 패널에서도 동일
+  내용을 cross-link 한다.
 
 > 운영 전환 전에 검토할 항목 전체 목록은 `docs/architecture.md §5`의 "보장하지 않는다" 절
 > 참조.
