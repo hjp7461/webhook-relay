@@ -244,32 +244,38 @@
 본 PLAN 안에서 직접 적용된 C-MET 와 별도 PR 로 사용자가 결정 위임된 C-MET 를
 단일 출처로 정리한다.
 
-### 본 PLAN 내 직접 적용 (4건)
+> **최종 확정 시점:** M-OBS-6 — 본 PLAN 의 모든 마일스톤 종료 시점에 갱신.
+> 표의 ✅ (적용 완료) / ❌ (별도 PR 위임) 상태는 M-OBS-6 단계에서 잠긴다.
 
-| C-MET ID | 적용 마일스톤 | 적용 형태 |
-|----------|----------------|------------|
-| **C-MET-2** | M-OBS-1 | IT-R1 grep 룰을 `webhook_relay_` 접두 예외 처리하도록 갱신. PRD/architecture.md 본문 갱신은 별도 PR. |
-| **C-MET-7 (일부)** | M-OBS-1 | `.env.example` 에 `WORKER_METRICS_PORT=3001` 추가. `METRICS_BEARER_TOKEN` 은 Q-OBS-1 (a) 결정에 따라 도입 안 함. |
-| **C-MET-8** | M-OBS-4 | `docker-compose.yml` worker 서비스에 `/metrics` 포트 노출 (Q-OBS-3 (a) 정합). |
-| **C-MET-12** | M-OBS-4 | `docker/grafana/.gitkeep` 제거 (실제 파일이 들어오므로). |
+### 본 PLAN 내 직접 적용 (4건, ✅)
 
-### 별도 PR 로 사용자 결정 위임 (13건)
+| 상태 | C-MET ID | 적용 마일스톤 | 적용 형태 |
+|------|----------|----------------|------------|
+| ✅ | **C-MET-2** | M-OBS-1 | IT-R1 grep 룰을 `webhook_relay_` 접두 예외 처리하도록 갱신. PRD/architecture.md 본문 갱신은 별도 PR. |
+| ✅ | **C-MET-7 (일부)** | M-OBS-1 | `.env.example` 에 `WORKER_METRICS_PORT=3001` 추가. `METRICS_BEARER_TOKEN` 은 Q-OBS-1 (a) 결정에 따라 도입 안 함. |
+| ✅ | **C-MET-8** | M-OBS-4 | `docker-compose.yml` worker 서비스에 `/metrics` 포트 노출 (Q-OBS-3 (a) 정합). |
+| ✅ | **C-MET-12** | M-OBS-4 | `docker/grafana/.gitkeep` 제거 (실제 파일이 들어오므로). |
 
-| C-MET ID | 대상 문서 | 갱신 제안 | 위임 이유 |
-|----------|-----------|-----------|-----------|
-| **C-MET-1** | `prd/04-architecture-boundaries.md` §7 표 | "메트릭 정의(정의만) — 실제 노출은 3단계" 줄을 "3단계 PRD에서 prom-client 도입 + 도메인 무관 메트릭 정의 + Registry 노출" 로 갱신 | PRD 갱신 — 별도 PR. |
-| **C-MET-3** | `architecture.md` §5 | "Prometheus/Grafana 관측성(3단계 PRD)" 줄을 "보장한다" 로 이동 | 본 PLAN 완료 후 별도 PR. |
-| **C-MET-4** | `prd/05-api-and-contracts.md` §4 또는 §6 | `GET /metrics` 명세 추가 또는 본 PRD `prd-phase3/02` 로 cross-link | 별도 PR. |
-| **C-MET-5** | `prd/06-security-and-ops.md` §6.2 표 | `/metrics` 행 추가 (Q-OBS-2 (a) — 200 유지) | 별도 PR. |
-| **C-MET-6** | `architecture.md` §2 컴포넌트 표 | "Metrics Endpoint" 행 추가 (`packages/demo/src/api/metrics.ts`) | 별도 PR. |
-| **C-MET-9** | `README.md` 빠른 시작 | "Prometheus: http://localhost:9090" 추가 | 별도 PR. |
-| **C-MET-10** | `README.md` 운영 노트 | "Grafana admin 기본값 변경" 항목 추가 | 별도 PR. |
-| **C-MET-11** | `architecture.md` §2 컴포넌트 표 | "Prometheus" / "Grafana" 행 추가 | 별도 PR. |
-| **C-MET-13** | `architecture.md` §5 "보장한다" | SLO-1~4 항목 추가 | PLAN 완료 후 별도 PR. |
-| **C-MET-14** | `prd/06-security-and-ops.md` 운영 노트 | "알람 라우팅·온콜은 본 PRD 범위 밖" 명시 | 별도 PR. |
-| **C-MET-15** | `README.md` 운영 노트 | "SLO 임계는 잠정값이며 4단계 실측 후 재조정" 명시 | 별도 PR. |
-| **C-MET-16** | `CLAUDE.md` §3 폴더 구조 | `docker/prometheus/rules/` 추가 명시 | **CLAUDE.md 수정**은 본 PLAN 범위 밖. 사용자 결정 후 별도 PR. |
-| **C-MET-17** | `prd/03-test-strategy.md` 또는 새 phase3 test-strategy | IT-OBS-1~12 시나리오 정의 | 별도 PR. |
+### 별도 PR 로 사용자 결정 위임 (13건, ❌)
+
+| 상태 | C-MET ID | 대상 문서 | 갱신 제안 | 위임 이유 |
+|------|----------|-----------|-----------|-----------|
+| ❌ | **C-MET-1** | `prd/04-architecture-boundaries.md` §7 표 | "메트릭 정의(정의만) — 실제 노출은 3단계" 줄을 "3단계 PRD에서 prom-client 도입 + 도메인 무관 메트릭 정의 + Registry 노출" 로 갱신 | PRD 갱신 — 별도 PR. |
+| ❌ | **C-MET-3** | `architecture.md` §5 | "Prometheus/Grafana 관측성(3단계 PRD)" 줄을 "보장한다" 로 이동 | 본 PLAN 완료 후 별도 PR. |
+| ❌ | **C-MET-4** | `prd/05-api-and-contracts.md` §4 또는 §6 | `GET /metrics` 명세 추가 또는 본 PRD `prd-phase3/02` 로 cross-link | 별도 PR. |
+| ❌ | **C-MET-5** | `prd/06-security-and-ops.md` §6.2 표 | `/metrics` 행 추가 (Q-OBS-2 (a) — 200 유지) | 별도 PR. |
+| ❌ | **C-MET-6** | `architecture.md` §2 컴포넌트 표 | "Metrics Endpoint" 행 추가 (`packages/demo/src/api/metrics.ts`) | 별도 PR. |
+| ❌ | **C-MET-9** | `README.md` 빠른 시작 | "Prometheus: http://localhost:9090" 추가 | 별도 PR. |
+| ❌ | **C-MET-10** | `README.md` 운영 노트 | "Grafana admin 기본값 변경" 항목 추가 | 별도 PR. |
+| ❌ | **C-MET-11** | `architecture.md` §2 컴포넌트 표 | "Prometheus" / "Grafana" 행 추가 | 별도 PR. |
+| ❌ | **C-MET-13** | `architecture.md` §5 "보장한다" | SLO-1~4 항목 추가 | PLAN 완료 후 별도 PR. |
+| ❌ | **C-MET-14** | `prd/06-security-and-ops.md` 운영 노트 | "알람 라우팅·온콜은 본 PRD 범위 밖" 명시 | 별도 PR. |
+| ❌ | **C-MET-15** | `README.md` 운영 노트 | "SLO 임계는 잠정값이며 4단계 실측 후 재조정" 명시 | 별도 PR. |
+| ❌ | **C-MET-16** | `CLAUDE.md` §3 폴더 구조 | `docker/prometheus/rules/` 추가 명시 | **CLAUDE.md 수정**은 본 PLAN 범위 밖. 사용자 결정 후 별도 PR. |
+| ❌ | **C-MET-17** | `prd/03-test-strategy.md` 또는 새 phase3 test-strategy | IT-OBS-1~12 시나리오 정의 | 별도 PR. |
+
+> PLAN `07-m-obs-6-refinement.md` §10 의 표가 본 §8 의 단일 출처 짝이며,
+> 두 표는 글자 단위로 일치한다(M-OBS-6 잠금 시점 기준).
 
 ### 본 PLAN 완료 후 권장 PR 순서
 
