@@ -73,10 +73,20 @@
 ### 6.2 시퀀스 (워커 프로세스)
 1. SIGTERM 수신 → 부트스트랩에서 셧다운 핸들러 호출 (`core/shutdown.ts`).
 2. 워커 `pause()` → 새 작업 수신 중단.
-3. Fastify 서버: `/webhooks`는 `503`을 응답(셧다운 진행 중). `/healthz`는 `503`.
+3. Fastify 서버의 draining 토글이 다음 라우트에 영향을 준다:
+   - `POST /webhooks` → `503 ERR_SHUTTING_DOWN` (인증 검증 이전에 분기)
+   - `GET /healthz` → `503` (LB/오케스트레이터 표준 신호 — Q-SEC-5 (a) 정합)
+   - `GET /dashboard`, `POST /_demo/receiver`, `GET /api/queue/stats` → **200 유지**
+     (관측성과 데모 수신자 동작을 셧다운 진행 중에도 보존)
 4. 진행 중 작업 완료 대기 (최대 `SHUTDOWN_TIMEOUT_MS`, 기본 30s).
-5. 타임아웃 도달 시 강제 종료 직전에 로그로 잔여 작업 ID 기록.
-6. BullMQ Worker/Queue close → ioredis quit → 프로세스 종료(exit code 0).
+5. 타임아웃 도달 시 강제 종료 직전에 로그로 **잔여 작업 ID** 기록.
+   - **정의:** "잔여 작업 ID" = `worker.getJobs(['active'])`의 결과. 즉 워커가
+     현재 lock을 보유하고 처리 중이던 active 작업의 ID 목록. 큐 전체의 대기
+     작업(`waiting`/`delayed`)은 포함하지 않는다(BullMQ가 재기동 시 자동 회수).
+   - 로그 형식: 구조화 JSON 한 줄(`{ remainingJobIds: string[], signal: ... }`).
+6. BullMQ Worker/Queue close → ioredis quit → 프로세스 종료.
+   - exit code: 정상 완료 시 `0`. 타임아웃 도달 시 `1` (Q-SEC-4 (b) — 잔여
+     작업이 있었음을 모니터링 신호로 일치).
 
 ### 6.3 비목표
 - 진행 중 작업의 **중도 체크포인트**(부분 진행 저장). 본 PRD 범위 밖.

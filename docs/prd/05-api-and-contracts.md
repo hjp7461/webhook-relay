@@ -76,7 +76,7 @@ WebhookCreateRequestSchema = z.object({
 ```json
 {
   "error": {
-    "code": "ERR_VALIDATION" | "ERR_PAYLOAD_TOO_LARGE" | "ERR_INTERNAL" | "...",
+    "code": "ERR_VALIDATION" | "ERR_UNAUTHORIZED" | "ERR_PAYLOAD_TOO_LARGE" | "ERR_INTERNAL" | "ERR_SHUTTING_DOWN",
     "message": "사람이 읽을 수 있는 요약",
     "details": [
       { "path": "url", "message": "Invalid URL" }
@@ -84,6 +84,8 @@ WebhookCreateRequestSchema = z.object({
   }
 }
 ```
+
+전체 코드 목록은 `packages/demo/src/constants.ts`의 `ERROR_CODES` 상수가 단일 소스다.
 
 - **400 Bad Request** — Zod 검증 실패. `details`에 필드별 메시지.
 - **401 Unauthorized** — `Authorization` 헤더 누락/형식 오류/토큰 불일치. 응답 본문 `details`는 비워 정보 누출 최소화.
