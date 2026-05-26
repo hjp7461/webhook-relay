@@ -73,15 +73,46 @@
 
 ---
 
-## 2. 오픈 퀘스천 (Q-OBS-N) — 결정 보류
+## 2. 오픈 퀘스천 (Q-OBS-N) — **2026-05-27 전건 일괄 잠금**
 
-> **사용법:** 1~2단계 PRD `07` §2 형식을 따른다.
-> 형식: **Q-#** — 질문 / **Options** — 선택지 / **Provisional** — 잠정 기본값(임의
-> 결정 아님, PLAN 진입 전에 사람이 잠근다) / **막히는 PLAN 영역** / **결정자: 사람**
+> **Status:** PRD 작성 시점의 15건 보류 항목은 사용자에 의해 2026-05-27 에
+> **provisional default 그대로** 일괄 잠금되었다.
+> 단일 소스 오브 트루스: **`docs/plan-phase3/00-decisions-needed.md`** (각 Q-OBS-ID
+> 의 최종 선택과 결정일이 기록됨).
+> 본 섹션의 Q-ID / Options / Provisional 기록은 의사결정 이력 추적 목적으로
+> 그대로 보존한다.
+>
+> **요약 결정표:**
+>
+> | Q-OBS-ID | 최종 결정 | Provisional과의 일치 |
+> |----------|-----------|----------------------|
+> | Q-OBS-1  | (a) 인증 없음 + README 경고 | 일치 |
+> | Q-OBS-2  | (a) 200 유지 | 일치 |
+> | Q-OBS-3  | (a) 워커 최소 HTTP 서버 (`WORKER_METRICS_PORT=3001`) | 일치 |
+> | Q-OBS-4  | (a) Grafana admin/admin + README 경고 | 일치 |
+> | Q-OBS-5  | (a) `status_class` enum | 일치 |
+> | Q-OBS-6  | (a) histogram bucket 으로 분해 | 일치 |
+> | Q-OBS-7  | (a) GUI export → JSON PR | 일치 |
+> | Q-OBS-8  | (a) 정적 path만 + 운영 규칙 | 일치 |
+> | Q-OBS-9  | (b) 잠정 잠금 + 4단계 실측 후 재조정 | 일치 |
+> | Q-OBS-10 | (a) 압축 없음 | 일치 |
+> | Q-OBS-11 | (a) 잠정값 + 4단계 재조정 | 일치 |
+> | Q-OBS-12 | (a) 14.4× / 6× 표준값 | 일치 |
+> | Q-OBS-13 | (a) `reason="non_retriable"` SLO-4 포함 | 일치 |
+> | Q-OBS-14 | (a) IT-R1 grep 예외 | 일치 |
+> | Q-OBS-15 | (a) `docs/plan-phase3/` | 일치 |
+>
+> **전건 (15/15) 잠금 결과 == provisional default.** 임의 결정 위반 없음 — 사용자가
+> 2026-05-27 "기본값으로 진행" 명시 결정.
+
+> 형식 (이력 보존용): **Q-#** — 질문 / **Options** — 선택지 / **Provisional** —
+> 잠정 기본값(임의 결정 아님, PLAN 진입 전에 사람이 잠근다) / **막히는 PLAN 영역**
+> / **결정자: 사람**
 >
 > **운영 규칙:** PLAN 단계의 어떤 마일스톤도 자기에 해당하는 Q-OBS가 모두
 > Resolved 가 되기 전에는 구현 코드를 작성하지 않는다(1~2단계 PLAN
-> `00-decisions-needed.md` §3 정합).
+> `00-decisions-needed.md` §3 정합). **15건 전건 2026-05-27 Resolved이므로 모든
+> 마일스톤 진행 가능.**
 
 ### 2.1 우선순위 표 (가장 시급한 항목)
 
