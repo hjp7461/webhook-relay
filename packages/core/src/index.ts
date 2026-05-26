@@ -21,3 +21,11 @@ export type { ClassifiedErrorContext } from "./errors.js";
 
 export { delayForAttempt, buildWorkerRetryOptions } from "./retry.js";
 export type { RetryPolicy, WorkerRetryOptions } from "./retry.js";
+
+export { createDlqQueue, buildDlqEntry } from "./dlq.js";
+export type {
+  CreateDlqQueueOptions,
+  BuildDlqEntryInput,
+  DlqJobData,
+  DlqLastError,
+} from "./dlq.js";
