@@ -189,6 +189,16 @@ export interface StartSharedWorkerOptions {
   readonly stalledIntervalMs?: number;
   /** stalled 마킹 최대 횟수. */
   readonly maxStalledCount?: number;
+  /**
+   * BullMQ 작업 lock duration(ms). 워커가 작업을 잡으면 본 시간 동안 lock 을
+   * 보유하며, lockDuration/2 마다 자동 갱신을 시도한다. 워커가 죽으면 갱신이
+   * 멈춰 lockDuration 후 만료되고, 다른 워커의 stalled scanner 가 회수한다.
+   *
+   * IT-S6 는 wall-clock 회수 시간을 줄이기 위해 본 값을 짧게 설정한다(예: 1000ms).
+   * 운영에서는 BullMQ 기본 30s 를 그대로 사용한다 — 본 옵션은 테스트 전용 채널
+   * 이며 AppConfig/env 에 노출하지 않는다(PRD `05` §8 미확장).
+   */
+  readonly lockDurationMs?: number;
   /** 동시 처리 수(기본 1). */
   readonly concurrency?: number;
   /** HMAC 시크릿(기본은 fixture 기본과 동일한 32-byte placeholder). */
@@ -242,6 +252,9 @@ export async function startSharedWorker(
         : {}),
       ...(opts.maxStalledCount !== undefined
         ? { maxStalledCount: opts.maxStalledCount }
+        : {}),
+      ...(opts.lockDurationMs !== undefined
+        ? { lockDuration: opts.lockDurationMs }
         : {}),
     },
   );
