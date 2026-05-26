@@ -1,0 +1,9 @@
+{
+  "name": "@webhook-relay/demo",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@webhook-relay/core": "workspace:*"
+  }
+}
