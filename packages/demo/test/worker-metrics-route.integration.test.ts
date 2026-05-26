@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
+import process from "node:process";
 import { startRedisContainer, type StartedRedis } from "./helpers/redis-container.js";
 import { buildWorkerServer, type BuiltWorkerServer } from "../src/server.js";
 import type { AppConfig } from "../src/config.js";
@@ -20,7 +21,27 @@ let redis: StartedRedis;
 let built: BuiltWorkerServer;
 let metricsBaseUrl: string;
 
+// 워커가 idle 상태(아무 job 도 처리하지 않은 채 blocking 명령 대기 중)에서
+// 셧다운될 때 BullMQ 내부 duplicated ioredis 연결이 "Connection is closed"
+// 를 unhandled 로 emit 한다. 본 테스트는 도메인 핸들러를 호출하지 않으므로
+// idle 상태 그대로 종료된다. 운영에서는 동일 시나리오에서 프로세스가
+// exit 하므로 영향 없음. 본 unhandled 는 테스트 결정성에 영향이 없으니
+// 명시적으로 swallow 한다(원인/조건은 본 주석 참조).
+function isBenignConnectionClosed(err: unknown): boolean {
+  return (
+    err instanceof Error && err.message === "Connection is closed."
+  );
+}
+
+const benignHandler = (err: unknown): void => {
+  if (!isBenignConnectionClosed(err)) {
+    // 다른 unhandled 는 그대로 throw → Vitest 가 실패로 표기.
+    throw err;
+  }
+};
+
 beforeAll(async () => {
+  process.on("unhandledRejection", benignHandler);
   redis = await startRedisContainer();
 
   const queueName = `webhook-it-worker-${randomUUID()}`;
@@ -60,6 +81,7 @@ beforeAll(async () => {
 afterAll(async () => {
   if (built) await built.close();
   if (redis) await redis.stop();
+  process.removeListener("unhandledRejection", benignHandler);
 }, 60_000);
 
 describe("GET /metrics — SERVICE_MODE=worker mode", () => {
