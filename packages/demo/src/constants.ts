@@ -6,6 +6,10 @@
 export const QUEUE_NAME = "webhook-delivery";
 export const DLQ_NAME = "webhook-delivery-dlq";
 
+// HMAC 서명 헤더의 기본 이름(PRD `06` §2.2 — `WEBHOOK_HMAC_HEADER` 의 default).
+// 환경변수로 재정의 가능(config Zod default 가 본 상수를 참조).
+export const DEFAULT_WEBHOOK_HMAC_HEADER = "X-Webhook-Signature";
+
 export const ROUTE_WEBHOOKS = "/webhooks";
 export const ROUTE_DEMO_RECEIVER = "/_demo/receiver";
 export const ROUTE_DASHBOARD = "/dashboard";

@@ -1,5 +1,9 @@
 import { z } from "zod";
-import { QUEUE_NAME, DLQ_NAME } from "./constants.js";
+import {
+  DEFAULT_WEBHOOK_HMAC_HEADER,
+  DLQ_NAME,
+  QUEUE_NAME,
+} from "./constants.js";
 
 // demo/config.ts
 //
@@ -74,7 +78,7 @@ const ConfigEnvSchema = z.object({
   WEBHOOK_HMAC_SECRET: z
     .string({ message: "WEBHOOK_HMAC_SECRET is required" })
     .min(MIN_SECRET_BYTES, `WEBHOOK_HMAC_SECRET must be at least ${MIN_SECRET_BYTES} bytes`),
-  WEBHOOK_HMAC_HEADER: z.string().min(1).default("X-Webhook-Signature"),
+  WEBHOOK_HMAC_HEADER: z.string().min(1).default(DEFAULT_WEBHOOK_HMAC_HEADER),
   DLQ_NAME: z.string().min(1).default(DLQ_NAME),
   STALLED_INTERVAL_MS: positiveIntFromString
     .default(30000 as unknown as never)
