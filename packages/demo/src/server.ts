@@ -5,11 +5,14 @@ import {
   createDlqQueue,
   createQueue,
   createWorker,
+  gracefulShutdown,
   type CoreJobHandler,
   type DlqJobData,
 } from "@webhook-relay/core";
 import type { Queue, Worker } from "bullmq";
 import type { Redis } from "ioredis";
+import { pathToFileURL } from "node:url";
+import process from "node:process";
 
 import type { AppConfig } from "./config.js";
 import { loadConfigFromProcessEnv } from "./config.js";
@@ -225,7 +228,12 @@ export async function buildServer(config: AppConfig): Promise<BuiltServer> {
 
 /**
  * 프로세스 진입점. process.env 를 파싱하고 서버를 띄운다.
- * SIGINT/SIGTERM 수신 시 최소 셧다운 호출(전체 시퀀스는 M7).
+ *
+ * 시그널 처리(M7, Q-SEC-4 (b), Q-OPS-2 (b)):
+ *  - SIGTERM/SIGINT 수신 시 core.gracefulShutdown(...) 을 호출한다.
+ *  - boolean guard 로 중복 수신 방지(두 번째 이후 시그널은 무시).
+ *  - 결과의 timedOut 에 따라 process.exit(0|1).
+ *  - 타임아웃 시 잔여 작업 ID 를 구조화 JSON 한 줄로 출력(remainingJobIds 키).
  */
 export async function main(): Promise<void> {
   const config = loadConfigFromProcessEnv();
@@ -237,20 +245,65 @@ export async function main(): Promise<void> {
   });
   built.fastify.log.info({ address }, "server listening");
 
-  const shutdown = (signal: string): void => {
+  let shuttingDown = false;
+  const handleSignal = (signal: NodeJS.Signals): void => {
+    if (shuttingDown) {
+      // 중복 시그널은 무시(두 번째 이후 SIGTERM/SIGINT).
+      return;
+    }
+    shuttingDown = true;
     built.fastify.log.info({ signal }, "shutdown requested");
-    built
-      .close()
-      .then(() => {
-        // 정상 종료. M7 에서 잔여 작업 여부에 따라 exit code 분기(Q-SEC-4 (b)).
-        process.exit(0);
+
+    // gracefulShutdown 은 본 모듈의 setDraining/close 추상을 받아
+    // 시퀀스(setDraining → worker.close(false) race timeout → http close →
+    // queue/dlq close → redis.quit)를 수행한다. 도메인 식별자/Fastify 노출 없음.
+    void gracefulShutdown({
+      worker: built.worker,
+      queue: built.queue.raw,
+      dlqQueue: built.dlqQueue,
+      redis: built.connection,
+      httpServer: {
+        setDraining: (v: boolean): void => built.setDraining(v),
+        close: async (): Promise<void> => {
+          await built.fastify.close();
+        },
+      },
+      timeoutMs: config.SHUTDOWN_TIMEOUT_MS,
+      onTimeout: (remainingJobIds: string[]): void => {
+        // PRD `06` §6.2.5: 강제 종료 직전에 잔여 작업 ID 를 로그로 기록.
+        // 테스트(IT-S7 케이스 B) 는 본 라인을 grep 하여 단언한다.
+        built.fastify.log.warn(
+          { remainingJobIds, signal },
+          "shutdown timeout reached; remaining active jobs",
+        );
+      },
+    })
+      .then((result) => {
+        // Q-SEC-4 (b): 정상 완료 → 0. 타임아웃 강제 종료 → 1.
+        process.exit(result.timedOut ? 1 : 0);
       })
       .catch((err: unknown) => {
-        built.fastify.log.error({ err }, "shutdown error");
+        // gracefulShutdown 내부는 best-effort 라 거의 reject 하지 않지만,
+        // 안전망으로 1 로 종료.
+        const msg = err instanceof Error ? err.message : String(err);
+        built.fastify.log.error({ err: msg }, "shutdown error");
         process.exit(1);
       });
   };
 
-  process.on("SIGTERM", () => shutdown("SIGTERM"));
-  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on("SIGTERM", () => handleSignal("SIGTERM"));
+  process.on("SIGINT", () => handleSignal("SIGINT"));
+}
+
+// 자식 프로세스(IT-S7) 또는 `tsx packages/demo/src/server.ts` 로 본 파일이
+// 직접 실행되면 main() 을 호출한다. main.ts 로부터 import 될 때는 본 분기가
+// false 가 되어 중복 실행을 피한다.
+const isDirectEntry =
+  typeof process.argv[1] === "string" && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isDirectEntry) {
+  main().catch((err: unknown) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`[bootstrap] ${msg}\n`);
+    process.exit(1);
+  });
 }
