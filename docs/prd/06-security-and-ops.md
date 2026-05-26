@@ -58,6 +58,10 @@
 ### 5.1 정책
 - BullMQ는 ioredis 권장. 재연결 정책은 ioredis 옵션으로 구현하며 **무한 즉시 재시도 금지**.
 - `REDIS_RECONNECT_BASE_MS` (기본 200ms), `REDIS_RECONNECT_MAX_MS` (기본 10s)로 지수 백오프 적용.
+- 적용 함수: `packages/core/src/queue.ts::computeReconnectDelay`
+  (ioredis `retryStrategy` 에 주입). 공식: `delay = min(cap, base * 2^(times-1))`
+  (base = max(1, REDIS_RECONNECT_BASE_MS), cap = max(base, REDIS_RECONNECT_MAX_MS)).
+  단위 테스트(`packages/core/test/reconnect-backoff.unit.test.ts`)로 단언.
 - 재연결 실패는 구조화 로그로 남기되, 동일 메시지의 폭주를 막기 위해 로그 throttling 권장
   (구현 방법은 PLAN 단계 결정).
 
