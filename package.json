@@ -11,10 +11,11 @@
     "typecheck": "tsc -b",
     "build": "tsc -b",
     "test": "vitest run",
-    "test:unit": "vitest run --project unit",
-    "test:integration": "vitest run --project integration"
+    "test:unit": "vitest run --project unit --passWithNoTests",
+    "test:integration": "vitest run --project integration --passWithNoTests"
   },
   "devDependencies": {
+    "@types/node": "^24.0.0",
     "typescript": "^5.6.0",
     "vitest": "^3.0.0"
   }
