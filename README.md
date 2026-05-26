@@ -155,6 +155,9 @@ Producer ──add──> BullMQ Queue ──> Worker pool (수평 확장)
   Cluster 구성, BullMQ의 `connection` 옵션 갱신 필요.
 - **DLQ 운영 절차:** 자동 재투입은 본 PRD 범위 밖(Q-DLQ-1). 운영자가 DLQ를 주기적으로
   검사하고, poison message는 페이로드 분석 후 수동으로 처리하거나 제거하는 절차 필요.
+  DLQ 자체의 보존 정책은 기본 **14일 / 최근 10000건**(`packages/demo/src/constants.ts`의
+  `DLQ_REMOVE_ON_FAIL_COUNT` / `DLQ_REMOVE_ON_FAIL_AGE_SECONDS`에서 조정). 메인 큐의
+  실패 즉시 제거(`removeOnFail: { count: 0 }`)와는 의도적으로 분리되어 있다 — DLQ 는 검사 대상.
 - **`removeOnComplete` 정책:** 완료 작업은 Redis 메모리 누적 방지를 위해 일정 개수/시간
   뒤 자동 제거. 본 저장소는 `count: 1000`, `age: 86400s`로 설정(`packages/demo/src/constants.ts`).
   관측성 요구가 강하다면 3단계 PRD에서 보관 기간을 늘리거나 별도 저장소로 옮길 수 있음.

@@ -207,6 +207,8 @@ SIGTERM ──► handleSignal()
 - ✅ **분류된 재시도** — 5xx/네트워크/timeout/408/425/429는 재시도, 4xx/3xx는 즉시 격리(I2.3).
 - ✅ **DLQ 단방향** — 원 큐 → DLQ는 자동이지만, DLQ → 원 큐 재투입은 본 PRD 범위 밖(I2.4, Q-DLQ-1).
 - ✅ **DLQ 보존 컨텍스트** — 페이로드 + `errorClass` + `httpStatus` + `attemptsMade` + `message`.
+  보존 정책: 최근 10000건 / 14일(`DLQ_REMOVE_ON_FAIL_COUNT` / `DLQ_REMOVE_ON_FAIL_AGE_SECONDS`,
+  `packages/demo/src/constants.ts`). 메인 큐의 `removeOnFail: { count: 0 }` 와 의도적으로 분리.
 - ✅ **외부 송신 타임아웃** — `WEBHOOK_DELIVERY_TIMEOUT_MS`로 `AbortController` 적용(I6.1).
 - ✅ **HMAC 서명** — HMAC-SHA256, 결정성(재시도 시 동일 서명).
 - ✅ **그레이스풀 셧다운** — SIGTERM 시 진행 작업 완료 + 신규 요청 503(I2.6, I6.3).

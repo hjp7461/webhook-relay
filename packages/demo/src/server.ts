@@ -25,6 +25,9 @@ import { createWebhookDeliveryHandler } from "./handlers/webhook-delivery.js";
 import type { WebhookJobData } from "./domain/schemas.js";
 import {
   DLQ_NAME as CONSTANT_DLQ_NAME,
+  DLQ_REMOVE_ON_COMPLETE_COUNT,
+  DLQ_REMOVE_ON_FAIL_AGE_SECONDS,
+  DLQ_REMOVE_ON_FAIL_COUNT,
   QUEUE_NAME as CONSTANT_QUEUE_NAME,
   REMOVE_ON_COMPLETE_AGE_SECONDS,
   REMOVE_ON_COMPLETE_COUNT,
@@ -161,11 +164,30 @@ function createMainQueue(
 }
 
 // 공통 helper — DLQ 큐 생성.
+//
+// DLQ 보존 정책(constants.ts):
+// - removeOnFail.count: 최근 10000건만 유지(운영자가 분석할 마진).
+// - removeOnFail.age: 14일 이후 자동 제거(무한 누적 방지).
+// - removeOnComplete.count: 안전망(본 PRD 에서 DLQ 의 completed 는 거의 없음).
+// 메인 큐(removeOnFail: { count: 0 })와 의도적으로 분리한다 — DLQ 는 검사 대상.
 function createDlq(
   config: AppConfig,
   connection: Redis,
 ): Queue<DlqJobData<WebhookJobData>, void, string> {
-  return createDlqQueue<WebhookJobData>(config.DLQ_NAME, { connection });
+  return createDlqQueue<WebhookJobData>(config.DLQ_NAME, {
+    connection,
+    queueOptions: {
+      defaultJobOptions: {
+        removeOnFail: {
+          count: DLQ_REMOVE_ON_FAIL_COUNT,
+          age: DLQ_REMOVE_ON_FAIL_AGE_SECONDS,
+        },
+        removeOnComplete: {
+          count: DLQ_REMOVE_ON_COMPLETE_COUNT,
+        },
+      },
+    },
+  });
 }
 
 // 공통 helper — QueueFacade 구성.
