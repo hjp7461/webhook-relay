@@ -2,6 +2,23 @@ import { UnrecoverableError, Worker, type Job, type Queue, type WorkerOptions } 
 import type { Redis } from "ioredis";
 import { NonRetriableError, RetriableError } from "./errors.js";
 import { buildDlqEntry, type DlqJobData, type DlqLastError } from "./dlq.js";
+import {
+  JOB_STATE_COMPLETED,
+  JOB_STATE_FAILED,
+  LABEL_JOB_STATE,
+  LABEL_OUTCOME,
+  LABEL_QUEUE,
+  OUTCOME_NON_RETRIABLE_ERROR,
+  OUTCOME_RETRIABLE_ERROR,
+  OUTCOME_SUCCESS,
+  type AttemptOutcome,
+} from "./constants.js";
+import {
+  jobAttemptsTotal,
+  jobsProcessedTotal,
+  workerActiveJobs,
+  workerProcessingDurationSeconds,
+} from "./metrics.js";
 
 // core/worker.ts
 //
@@ -121,10 +138,19 @@ export function createWorker<TData>(
       if (trackingId !== undefined) {
         activeJobs.set(trackingId, { data: coreJob.data, attemptsMade: coreJob.attemptsMade });
       }
+      // M-OBS-2 C6 — 진입 시 +1 / 종단 시 -1 (동기, 비차단).
+      workerActiveJobs.inc();
+      // M-OBS-2 C4 — startTimer 는 outcome 라벨을 endTimer 시점에 받는다.
+      const endTimer = workerProcessingDurationSeconds.startTimer({
+        [LABEL_QUEUE]: name,
+      });
+      // M-OBS-2 C3 — outcome 라벨을 종단 분기에서 결정해 inc.
+      let outcome: AttemptOutcome = OUTCOME_SUCCESS;
       try {
         await handler(coreJob);
       } catch (err) {
         if (err instanceof NonRetriableError) {
+          outcome = OUTCOME_NON_RETRIABLE_ERROR;
           // BullMQ 는 UnrecoverableError(또는 name=='UnrecoverableError') 를
           // 보면 attempts 를 무시하고 즉시 failed 로 처리한다.
           // 메시지/cause 는 보존하여 상위 로깅이 활용할 수 있게 한다.
@@ -133,6 +159,8 @@ export function createWorker<TData>(
           (wrapped as Error & { cause?: unknown }).cause = err;
           throw wrapped;
         }
+        // RetriableError 또는 분류 부재(보수적으로 retriable).
+        outcome = OUTCOME_RETRIABLE_ERROR;
         throw err;
       } finally {
         // 핸들러가 정상/실패 모두 종료된 시점에 추적 제거. lock 손실 등으로
@@ -141,6 +169,11 @@ export function createWorker<TData>(
         if (trackingId !== undefined) {
           activeJobs.delete(trackingId);
         }
+        // M-OBS-2 C6 — 종단 시 -1. M-OBS-2 C4 — endTimer 에 outcome 주입.
+        // M-OBS-2 C3 — outcome 라벨로 시도 카운트 +1.
+        workerActiveJobs.dec();
+        endTimer({ [LABEL_OUTCOME]: outcome });
+        jobAttemptsTotal.inc({ [LABEL_QUEUE]: name, [LABEL_OUTCOME]: outcome });
       }
     },
     {
@@ -148,6 +181,43 @@ export function createWorker<TData>(
       connection,
     },
   );
+
+  // M-OBS-2 C2 — 종단 실패/완료 이벤트에서 카운터 증가. BullMQ 의 'completed'
+  // 는 종단 완료, 'failed' 는 한 시도의 실패(중간/종단 모두). PRD §3.1 C2 는
+  // 종단 작업만(`job_state ∈ {completed, failed}`) 카운트 — 따라서 'failed'
+  // 에서는 종단 여부를 판별해야 한다.
+  worker.on("completed", () => {
+    jobsProcessedTotal.inc({
+      [LABEL_QUEUE]: name,
+      [LABEL_JOB_STATE]: JOB_STATE_COMPLETED,
+    });
+  });
+  worker.on("failed", (job, err) => {
+    // 종단 실패 분류: NonRetriable(UnrecoverableError wrap 포함) 또는
+    // attemptsMade >= attempts. handleFailedForDlq 와 동일한 종단 판정 로직.
+    if (job === undefined) {
+      // stalled-loss: 'failed(undefined)' 는 종단으로 본다(원 작업 메타가
+      // 사라졌으므로 재시도 불가). C2 +1.
+      jobsProcessedTotal.inc({
+        [LABEL_QUEUE]: name,
+        [LABEL_JOB_STATE]: JOB_STATE_FAILED,
+      });
+      return;
+    }
+    const original = unwrapClassifiedError(err);
+    const isNonRetriable =
+      original instanceof NonRetriableError ||
+      err instanceof UnrecoverableError ||
+      err.name === "UnrecoverableError";
+    const attempts = job.opts.attempts ?? 1;
+    const isTerminalByAttempts = job.attemptsMade >= attempts;
+    if (isNonRetriable || isTerminalByAttempts) {
+      jobsProcessedTotal.inc({
+        [LABEL_QUEUE]: name,
+        [LABEL_JOB_STATE]: JOB_STATE_FAILED,
+      });
+    }
+  });
 
   if (dlqQueue !== undefined) {
     // 'failed' 이벤트 핸들러: 종단 실패만 DLQ 로 이동.
