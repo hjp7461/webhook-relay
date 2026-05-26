@@ -28,6 +28,16 @@ import { buildDlqEntry, type DlqJobData, type DlqLastError } from "./dlq.js";
 //
 // 본 변환은 core 가 분류 시맨틱을 알지 못한 채 단순 매핑만 수행한다.
 // 도메인(어떤 응답이 NonRetriable 인가)은 demo 가 결정한다.
+//
+// stalled-loss recovery(best-effort):
+// - BullMQ 의 'failed' 이벤트가 `job === undefined` 로 발화되는 케이스
+//   (stalled job 메타데이터 복구 실패, lock 손실 등)에서 페이로드를 잃지
+//   않기 위해, 핸들러 진입 시점에 (jobId → {data, attemptsMade}) 를
+//   in-memory 맵에 등록하고 종료 시 제거한다. 'failed(undefined)' 가 오면
+//   in-memory 후보(들)를 모두 DLQ 로 best-effort 적재한다.
+// - 분류 정보가 없으므로 보수적으로 Retriable 로 적재(원래 재시도 가능했을
+//   가능성이 큼). 중복 위험 < 손실 위험.
+// - BullMQ 가 향후 jobId 를 error context 로 넘기면 그것을 우선 사용.
 
 export interface CoreJob<TData> {
   readonly id: string;
@@ -74,6 +84,12 @@ export interface CreateWorkerOptions<TData> {
  * `dlqQueue` 가 주입되면, 종단(terminal) 실패 시 DLQ 에 새 항목을
  * 적재한다(원본 페이로드 + lastError 컨텍스트 보존).
  */
+/** stalled-loss recovery 를 위한 in-memory 활성 작업 엔트리. */
+interface ActiveJobEntry<TData> {
+  readonly data: TData;
+  readonly attemptsMade: number;
+}
+
 export function createWorker<TData>(
   name: string,
   handler: CoreJobHandler<TData>,
@@ -87,6 +103,10 @@ export function createWorker<TData>(
     ...(stalledInterval !== undefined ? { stalledInterval } : {}),
     ...(maxStalledCount !== undefined ? { maxStalledCount } : {}),
   };
+
+  // 워커 프로세스 내부의 활성 작업 추적 맵. 핸들러 진입 시 등록, 종료 시 제거.
+  // 'failed(undefined)' 이벤트에서 페이로드를 잃지 않기 위한 best-effort 채널.
+  const activeJobs: Map<string, ActiveJobEntry<TData>> = new Map();
   const worker = new Worker<TData, void, string>(
     name,
     async (job: Job<TData, void, string>) => {
@@ -95,6 +115,12 @@ export function createWorker<TData>(
         data: job.data,
         attemptsMade: job.attemptsMade,
       };
+      // 활성 작업 등록. jobId 가 빈 문자열이면 추적 불가(BullMQ 는 보통 jobId 를
+      // 부여하지만 안전망으로 분기).
+      const trackingId = coreJob.id.length > 0 ? coreJob.id : undefined;
+      if (trackingId !== undefined) {
+        activeJobs.set(trackingId, { data: coreJob.data, attemptsMade: coreJob.attemptsMade });
+      }
       try {
         await handler(coreJob);
       } catch (err) {
@@ -108,6 +134,13 @@ export function createWorker<TData>(
           throw wrapped;
         }
         throw err;
+      } finally {
+        // 핸들러가 정상/실패 모두 종료된 시점에 추적 제거. lock 손실 등으로
+        // finally 자체가 도달하지 않는 경우는 'failed(undefined)' 적재 경로가
+        // 책임진다(잔여 엔트리 = stalled-loss 후보).
+        if (trackingId !== undefined) {
+          activeJobs.delete(trackingId);
+        }
       }
     },
     {
@@ -121,7 +154,30 @@ export function createWorker<TData>(
     // 본 핸들러는 promise 를 반환하지 않으며, 내부 await 결과는 의도적 처리
     // (실패 시 'error' 이벤트로 propagate — floating promise 금지 정책).
     worker.on("failed", (job, err) => {
-      if (job === undefined) return; // stalled 등에 의해 job 객체가 없는 경우 — M5 범위 외.
+      if (job === undefined) {
+        // stalled-loss recovery: BullMQ 가 job 메타데이터를 복구하지 못한 케이스.
+        // in-memory 활성 작업 후보(들)를 보수적으로 DLQ 로 적재.
+        const candidates = collectStalledLossCandidates(activeJobs, err);
+        if (candidates.length === 0) return;
+        const ambiguous = candidates.length > 1;
+        for (const [candidateId, entry] of candidates) {
+          // 본 분기에서 활성 맵에서 제거(중복 적재 방지).
+          activeJobs.delete(candidateId);
+          void handleStalledLossForDlq(
+            dlqQueue,
+            name,
+            candidateId,
+            entry,
+            err,
+            ambiguous,
+          ).catch((dlqErr: unknown) => {
+            const wrapped =
+              dlqErr instanceof Error ? dlqErr : new Error(String(dlqErr));
+            worker.emit("error", wrapped);
+          });
+        }
+        return;
+      }
       void handleFailedForDlq(dlqQueue, name, job, err).catch((dlqErr: unknown) => {
         // DLQ 적재 자체가 실패한 경우는 워커의 'error' 채널로 전파.
         const wrapped =
@@ -132,6 +188,54 @@ export function createWorker<TData>(
   }
 
   return worker;
+}
+
+/**
+ * 'failed(undefined)' 분기에서 in-memory 활성 작업 중 stalled-loss 후보를 고른다.
+ *
+ * BullMQ 가 향후 error context 에 jobId 를 포함하는 경우(예: `(err as any).jobId`)
+ * 그것을 우선 사용한다. 없으면 모든 활성 엔트리를 후보로 반환(보수적).
+ */
+function collectStalledLossCandidates<TData>(
+  activeJobs: Map<string, ActiveJobEntry<TData>>,
+  err: Error,
+): Array<[string, ActiveJobEntry<TData>]> {
+  // 향후 BullMQ 가 error 에 jobId 를 추가할 가능성에 대비한 best-effort 추출.
+  const maybeJobId = (err as Error & { jobId?: unknown }).jobId;
+  if (typeof maybeJobId === "string" && maybeJobId.length > 0) {
+    const entry = activeJobs.get(maybeJobId);
+    if (entry !== undefined) return [[maybeJobId, entry]];
+  }
+  // jobId 단서가 없으면 활성 맵 전체를 후보로(중복 위험 < 손실 위험).
+  return Array.from(activeJobs.entries());
+}
+
+/**
+ * stalled-loss 후보를 DLQ 로 적재한다. 분류 정보가 없으므로 보수적으로
+ * Retriable 로 마킹. message 에 'stalled' 키워드를 포함해 운영자가 식별 가능.
+ */
+async function handleStalledLossForDlq<TData>(
+  dlqQueue: Queue<DlqJobData<TData>, void, string>,
+  jobName: string,
+  candidateId: string,
+  entry: ActiveJobEntry<TData>,
+  err: Error,
+  ambiguous: boolean,
+): Promise<void> {
+  const baseMessage = err.message.length > 0 ? err.message : "job metadata lost";
+  const message = ambiguous
+    ? `stalled-loss-recovered (ambiguous candidate ${candidateId}): ${baseMessage}`
+    : `stalled-loss-recovered: ${baseMessage}`;
+  const lastError: DlqLastError = {
+    class: "Retriable",
+    attemptsMade: entry.attemptsMade,
+    message,
+  };
+  const dlqEntry = buildDlqEntry<TData>({
+    data: entry.data,
+    lastError,
+  });
+  await dlqQueue.add(jobName, dlqEntry);
 }
 
 /**
