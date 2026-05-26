@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { Queue } from "bullmq";
+import { Redis } from "ioredis";
 import { buildServer, type BuiltServer } from "../../src/server.js";
 import type { AppConfig } from "../../src/config.js";
 
@@ -6,11 +8,30 @@ import type { AppConfig } from "../../src/config.js";
 //
 // PLAN `03` §3.2 — 통합 테스트마다 고유한 큐 prefix(`randomUUID()`) 로
 // 격리한다(CLAUDE.md §5).
+//
+// M5: 테스트가 DLQ 큐를 단언할 수 있도록 별도의 BullMQ Queue 핸들을
+// 노출한다(PRD `02` §F2.4, PLAN `06` §3.1). 워커가 적재한 동일 dlqName
+// 의 Redis 자료구조를 가리키므로 read 전용 단언에 사용.
+
+export interface DlqJobEntry {
+  readonly id: string;
+  readonly name: string;
+  readonly data: unknown;
+}
+
+export interface DlqQueueFacade {
+  readonly name: string;
+  countJobs(): Promise<number>;
+  listJobs(): Promise<ReadonlyArray<DlqJobEntry>>;
+  close(): Promise<void>;
+}
 
 export interface AppFixture {
   readonly server: BuiltServer;
   readonly baseUrl: string;
   readonly queueName: string;
+  readonly dlqName: string;
+  readonly dlqQueue: DlqQueueFacade;
   readonly bearerToken: string;
   stop(): Promise<void>;
 }
@@ -28,6 +49,7 @@ export interface FixtureOptions {
 
 export async function startApp(opts: FixtureOptions): Promise<AppFixture> {
   const queueName = `webhook-it-${randomUUID()}`;
+  const dlqName = `${queueName}-dlq`;
   const bearerToken = opts.bearerToken ?? "t".repeat(32);
   const hmacSecret = opts.hmacSecret ?? "h".repeat(32);
   const config: AppConfig = {
@@ -41,7 +63,7 @@ export async function startApp(opts: FixtureOptions): Promise<AppFixture> {
     WEBHOOK_HMAC_SECRET: hmacSecret,
     WEBHOOK_HMAC_HEADER: "X-Webhook-Signature",
     QUEUE_NAME: queueName,
-    DLQ_NAME: `${queueName}-dlq`,
+    DLQ_NAME: dlqName,
     STALLED_INTERVAL_MS: 30000,
     MAX_STALLED_COUNT: 1,
     SHUTDOWN_TIMEOUT_MS: 30000,
@@ -55,12 +77,73 @@ export async function startApp(opts: FixtureOptions): Promise<AppFixture> {
   const server = await buildServer(config);
   const address = await server.fastify.listen({ port: 0, host: "127.0.0.1" });
 
+  // DLQ 큐를 read-only 단언용으로 별도의 ioredis 연결로 구성한다. 워커가
+  // 적재한 같은 Redis 키를 가리킨다(같은 dlqName + 같은 Redis).
+  const dlqConnection = new Redis(opts.redisUrl, {
+    maxRetriesPerRequest: null,
+    enableReadyCheck: false,
+  });
+  const dlqRawQueue = new Queue<unknown, unknown, string>(dlqName, {
+    connection: dlqConnection,
+  });
+
+  const dlqQueue: DlqQueueFacade = {
+    name: dlqName,
+    async countJobs(): Promise<number> {
+      // DLQ 는 추가만 되고 처리되지 않는다(I2.4). 그래도 보수적으로 모든
+      // 상태를 합산.
+      const counts = await dlqRawQueue.getJobCounts(
+        "waiting",
+        "active",
+        "completed",
+        "failed",
+        "delayed",
+      );
+      return (
+        (counts.waiting ?? 0) +
+        (counts.active ?? 0) +
+        (counts.completed ?? 0) +
+        (counts.failed ?? 0) +
+        (counts.delayed ?? 0)
+      );
+    },
+    async listJobs(): Promise<ReadonlyArray<DlqJobEntry>> {
+      const jobs = await dlqRawQueue.getJobs([
+        "waiting",
+        "active",
+        "completed",
+        "failed",
+        "delayed",
+      ]);
+      return jobs.map((j) => ({
+        id: j.id ?? "",
+        name: j.name,
+        data: j.data,
+      }));
+    },
+    async close(): Promise<void> {
+      try {
+        await dlqRawQueue.close();
+      } catch {
+        // best-effort
+      }
+      try {
+        await dlqConnection.quit();
+      } catch {
+        // best-effort
+      }
+    },
+  };
+
   return {
     server,
     baseUrl: address,
     queueName,
+    dlqName,
+    dlqQueue,
     bearerToken,
     async stop(): Promise<void> {
+      await dlqQueue.close();
       await server.close();
     },
   };
