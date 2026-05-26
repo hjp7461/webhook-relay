@@ -1,0 +1,37 @@
+# Prometheus alerting rules — 플랫폼 헬스(Redis 끊김 / 인스턴스 다운 / 셧다운
+# 타임아웃). SLO 외, 인프라 가시성.
+#
+# PRD `docs/prd-phase3/04-slo-and-alerts.md` §5.2.4 의 YAML 을 글자 단위로 옮긴다.
+# 본 카테고리는 SLO 라벨을 갖지 않는다(SLO ↔ 플랫폼 시그널 분리).
+groups:
+  - name: webhook-relay-platform
+    interval: 30s
+    rules:
+      - alert: WebhookRelayRedisDown
+        expr: webhook_relay_redis_up == 0
+        for: 1m
+        labels:
+          severity: page
+        annotations:
+          summary: "Redis disconnected (worker view)"
+      - alert: WebhookRelayRedisReconnectStorm
+        expr: increase(webhook_relay_redis_reconnects_total[5m]) > 10
+        for: 0m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Redis reconnect storm (>10 reconnects in 5m)"
+      - alert: WebhookRelayInstanceDown
+        expr: up{job=~"webhook-relay-.*"} == 0
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: "Instance scrape failing for >2m"
+      - alert: WebhookRelayShutdownTimedOut
+        expr: increase(webhook_relay_shutdown_remaining_jobs[10m]) > 0
+        for: 0m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Graceful shutdown timed out (remaining active jobs at exit)"
