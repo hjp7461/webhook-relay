@@ -23,6 +23,7 @@ import { registerReceiverRoute } from "./api/receiver.js";
 import { registerDashboardRoutes } from "./api/dashboard.js";
 import { registerHealthzRoute } from "./api/healthz.js";
 import { registerMetricsRoute } from "./api/metrics.js";
+import { registerApiMetricsPlugin } from "./api/metrics-plugin.js";
 import { createWebhookDeliveryHandler } from "./handlers/webhook-delivery.js";
 import type { WebhookJobData } from "./domain/schemas.js";
 import {
@@ -263,6 +264,9 @@ export async function buildServer(config: AppConfig): Promise<BuiltServer> {
     bodyLimit: config.WEBHOOK_MAX_PAYLOAD_BYTES,
   });
 
+  // M-OBS-3 D1/D2 wiring — 라우트 등록 이전에 onRequest/onResponse hook 부착.
+  await registerApiMetricsPlugin(fastify);
+
   // 라우트 등록
   await registerWebhooksRoute(fastify, {
     queue,
@@ -374,6 +378,9 @@ export async function buildApiServer(config: AppConfig): Promise<BuiltApiServer>
     bodyLimit: config.WEBHOOK_MAX_PAYLOAD_BYTES,
   });
 
+  // M-OBS-3 D1/D2 wiring — 라우트 등록 이전.
+  await registerApiMetricsPlugin(fastify);
+
   await registerWebhooksRoute(fastify, {
     queue,
     bearerToken: config.API_BEARER_TOKEN,
@@ -469,6 +476,8 @@ export async function buildWorkerServer(config: AppConfig): Promise<BuiltWorkerS
   const metricsApp = Fastify({
     logger: { level: config.LOG_LEVEL },
   });
+  // M-OBS-3 D1/D2 — `/metrics` 자체 요청도 라벨로 계측(ROUTE_ENUM 7종 중 하나).
+  await registerApiMetricsPlugin(metricsApp);
   await registerMetricsRoute(metricsApp);
 
   let closing = false;
