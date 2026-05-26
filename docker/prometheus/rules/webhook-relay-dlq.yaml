@@ -1,0 +1,38 @@
+# Prometheus alerting rules — SLO-4 DLQ 적재율 + stalled-loss recovery 신호.
+#
+# PRD `docs/prd-phase3/04-slo-and-alerts.md` §5.2.3 의 YAML 을 글자 단위로 옮긴다.
+# - SLO-4: 종단 처리 작업 중 DLQ 적재 비율 ≤ 1% (1h rate, 30m sustained).
+# - WebhookRelayDlqStalledLoss: BullMQ `failed(job===undefined)` 케이스가
+#   best-effort recovery 로 DLQ 에 적재된 즉시 page 발화. 워커 강제 종료/메타
+#   데이터 손실 신호.
+#
+# SLO-4 PromQL 은 분류 필터를 적용하지 않는다 — `reason="non_retriable"` 포함
+# (Q-OBS-13 (a)). poison message 비율도 운영 신호로 본다.
+groups:
+  - name: webhook-relay-dlq
+    interval: 30s
+    rules:
+      - alert: WebhookRelayDlqRateHigh
+        expr: |
+          (
+            sum(rate(webhook_relay_dlq_jobs_total[1h]))
+            /
+            clamp_min(sum(rate(webhook_relay_jobs_processed_total[1h])), 1)
+          ) > 0.01
+        for: 30m
+        labels:
+          severity: ticket
+          slo: SLO-4-dlq-rate
+        annotations:
+          summary: "DLQ ratio > 1% over 1h (sustained 30m)"
+      - alert: WebhookRelayDlqStalledLoss
+        expr: |
+          increase(webhook_relay_dlq_jobs_total{reason="stalled_loss_recovered"}[15m]) > 0
+        for: 0m
+        labels:
+          severity: page
+        annotations:
+          summary: "stalled-loss recovery fired — worker crashed mid-job"
+          description: |
+            BullMQ 'failed(job===undefined)' 케이스가 발생해 best-effort
+            recovery 가 DLQ 에 적재됨. 워커 강제 종료/메타데이터 손실 신호.
