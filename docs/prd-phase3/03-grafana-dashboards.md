@@ -233,7 +233,7 @@ services:
 
   grafana:
     image: grafana/grafana:latest
-    ports: ["3001:3000"]   # 호스트 3001 → 컨테이너 3000
+    ports: ["3002:3000"]   # 호스트 3002 → 컨테이너 3000 (worker /metrics 가 호스트 3001 사용 — 2026-05-27 결정)
     volumes:
       - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./docker/grafana/dashboards:/var/lib/grafana/dashboards:ro

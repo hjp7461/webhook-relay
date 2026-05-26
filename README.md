@@ -25,7 +25,7 @@ docker compose up
 # 대시보드: http://localhost:3000/dashboard
 # 메트릭: http://localhost:3000/metrics (api), http://localhost:3001/metrics (worker)
 # Prometheus: http://localhost:9090
-# Grafana: http://localhost:3001 (admin/admin — 데모 기본값)
+# Grafana: http://localhost:3002 (admin/admin — 데모 기본값)
 ```
 
 기본 `docker compose up` 은 `api` 와 `worker` 를 각 1개, Redis 1개를 띄운다.

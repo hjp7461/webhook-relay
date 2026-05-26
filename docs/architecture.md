@@ -32,7 +32,7 @@ Redis(BullMQ) 기반의 **at-least-once 웹훅 전송 작업 큐**. 외부로의
 | **Service Mode** | `packages/demo/src/server.ts` `main()` | `SERVICE_MODE` env (`all` / `api` / `worker`)로 프로세스 모드 분기. `all` = 단일 프로세스(데모 기본값, IT-S7 자식 호환), `api` = Fastify 만, `worker` = BullMQ Worker 만. 동일 이미지를 `docker compose up --scale worker=N` 으로 수평 확장 |
 | **Metrics Endpoint** | `packages/demo/src/api/metrics.ts`, `packages/core/src/metrics.ts` | `GET /metrics` Prometheus 텍스트 응답 (api 모드 3000 / worker 모드 `WORKER_METRICS_PORT=3001`). 도메인 무관 메트릭은 `core/metrics.ts` 에 정의(C1~C11), 도메인 메트릭은 `demo/src/metrics.ts` 에 정의(D1~D3 / W1~W4). 셧다운 진행 중에도 200 유지(Q-OBS-2 (a)) |
 | **Prometheus** | `docker/prometheus.yml`, `docker/prometheus/rules/` | scrape target = `webhook-relay-api` / `webhook-relay-worker`. rule_files glob 으로 SLO/플랫폼 알람 4 group 로드. `docker compose up` 후 `http://localhost:9090` |
-| **Grafana** | `docker/grafana/{dashboards,provisioning}/` | provisioning 으로 datasource(Prometheus) + 대시보드 4종(overview / reliability / dlq / shutdown) 자동 import. `editable: false` / `allowUiUpdates: false` 로 JSON PR 워크플로우 강제. `http://localhost:3001` (데모 기본 admin/admin) |
+| **Grafana** | `docker/grafana/{dashboards,provisioning}/` | provisioning 으로 datasource(Prometheus) + 대시보드 4종(overview / reliability / dlq / shutdown) 자동 import. `editable: false` / `allowUiUpdates: false` 로 JSON PR 워크플로우 강제. `http://localhost:3002` (데모 기본 admin/admin — worker `/metrics` 호스트 포트 3001 사용으로 3002 로 이동, 2026-05-27 결정) |
 
 ### 패키지 경계 (CLAUDE.md §3)
 
