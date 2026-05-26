@@ -1,6 +1,12 @@
 import type { Queue, Worker } from "bullmq";
 import type { Redis } from "ioredis";
 
+import {
+  SHUTDOWN_STATE_DRAINING,
+  SHUTDOWN_STATE_TERMINATED,
+} from "./constants.js";
+import { setShutdownState, shutdownRemainingJobs } from "./metrics.js";
+
 // core/shutdown.ts
 //
 // 그레이스풀 셧다운 시퀀서(PRD `06` §6.2, `02` §F2.6, I2.6/I6.3).
@@ -83,6 +89,9 @@ export async function gracefulShutdown(
 ): Promise<GracefulShutdownResult> {
   const { worker, queue, dlqQueue, redis, httpServer, timeoutMs, onTimeout } = input;
 
+  // M-OBS-2 C9 — shutdown_state 전이: running → draining.
+  setShutdownState(SHUTDOWN_STATE_DRAINING);
+
   // (1) draining 토글. 본 호출은 동기. 실패해도 다음 단계 진행.
   try {
     httpServer.setDraining(true);
@@ -122,6 +131,8 @@ export async function gracefulShutdown(
           remainingIds = [];
         }
       }
+      // M-OBS-2 C10 — 타임아웃 도달 직전 잔여 작업 수 set.
+      shutdownRemainingJobs.set(remainingIds.length);
       if (onTimeout !== undefined) {
         try {
           onTimeout(remainingIds);
@@ -135,7 +146,13 @@ export async function gracefulShutdown(
       } catch {
         // best-effort
       }
+    } else {
+      // M-OBS-2 C10 — 정상 종료(타임아웃 미발생) 시 잔여 작업 수 0.
+      shutdownRemainingJobs.set(0);
     }
+  } else {
+    // worker 가 없는 모드(API 전용): race 자체가 없으므로 잔여 작업 0.
+    shutdownRemainingJobs.set(0);
   }
 
   // (3) HTTP 서버 close. 진행 중 응답이 있으면 마치고 listening 소켓 종료.
@@ -165,6 +182,9 @@ export async function gracefulShutdown(
   } catch {
     // best-effort
   }
+
+  // M-OBS-2 C9 — 시퀀스 종료: terminated 로 전이.
+  setShutdownState(SHUTDOWN_STATE_TERMINATED);
 
   return { timedOut };
 }

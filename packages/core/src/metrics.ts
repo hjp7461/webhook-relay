@@ -27,7 +27,10 @@ import {
   METRIC_SHUTDOWN_STATE,
   METRIC_WORKER_ACTIVE_JOBS,
   METRIC_WORKER_PROCESSING_DURATION_SECONDS,
+  SHUTDOWN_STATES,
+  SHUTDOWN_STATE_RUNNING,
   WORKER_PROCESSING_DURATION_BUCKETS,
+  type ShutdownState,
 } from "./constants.js";
 
 // core/metrics.ts
@@ -200,3 +203,25 @@ export const buildInfo: Gauge<string> = new Gauge({
   help: "Build metadata exposed as a constant 1 sample for version tracking.",
   labelNames: [LABEL_VERSION, LABEL_COMMIT, LABEL_NODE_VERSION],
 });
+
+// ---------------------------------------------------------------------------
+// C9 seed — enum 라벨 3종 모두 즉시 노출 (`/metrics` 본문에 등장 보장).
+//
+// PRD `prd-phase3/01` §3.1 C9: "정확히 하나가 1, 나머지는 0".
+// 본 모듈 import 시점에 `running=1`, 나머지 2종은 0 으로 초기화한다.
+// ---------------------------------------------------------------------------
+
+for (const stateName of SHUTDOWN_STATES) {
+  shutdownState.set({ [LABEL_STATE]: stateName }, stateName === SHUTDOWN_STATE_RUNNING ? 1 : 0);
+}
+
+/**
+ * C9 shutdown_state 전이 helper — 지정한 state 만 1 로, 나머지는 0 으로 set.
+ *
+ * 본 함수는 도메인 식별자가 없으며 `core/shutdown.ts` 시퀀서가 호출한다.
+ */
+export function setShutdownState(next: ShutdownState): void {
+  for (const stateName of SHUTDOWN_STATES) {
+    shutdownState.set({ [LABEL_STATE]: stateName }, stateName === next ? 1 : 0);
+  }
+}
