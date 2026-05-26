@@ -9,7 +9,14 @@ import { ROUTE_METRICS } from "../constants.js";
 // 결정 잠금:
 // - Q-OBS-1 (a) — 인증 없음(내부망 전제). 미들웨어 미적용.
 // - Q-OBS-2 (a) — 셧다운 진행 중 200 유지. draining 분기에 본 라우트를
-//   추가하지 않는다(다른 200-유지 라우트와 동일 패턴).
+//   추가하지 않는다(다른 200-유지 라우트와 동일 패턴). 본 라우트는
+//   `isDraining` 의존성을 의도적으로 받지 않는다 — `/webhooks` 와 `/healthz`
+//   만 draining 진입 시 503 으로 거절(PRD `06` §6.2, PRD `02` §6.2). 이로써
+//   운영자는 셧다운 진행 중에도 `webhook_relay_shutdown_state{state="draining"}`,
+//   `webhook_relay_worker_active_jobs`, `webhook_relay_shutdown_remaining_jobs`
+//   를 외부에서 관측 가능하다(PRD `02` §I4.4).
+//   IT-OBS-9 가 본 동작(`/metrics` 200 + `/webhooks` 503 + `/healthz` 503
+//   동시 단언)을 회귀 보호한다.
 // - Q-OBS-10 (a) — 압축 강제 없음. Fastify 기본 협상 수용.
 
 export async function registerMetricsRoute(app: FastifyInstance): Promise<void> {
