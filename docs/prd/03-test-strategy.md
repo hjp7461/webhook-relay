@@ -106,6 +106,34 @@
 - **UT-5** 멱등성 키 정합성 검증 함수(형식·길이 제한).
 - **UT-6** HMAC 서명 생성 함수의 결정성(같은 입력 → 같은 서명).
 
+### 5.1 3단계 관측성 통합 시나리오 (IT-OBS-1~12)
+
+3단계 관측성 PRD(`docs/prd-phase3/`) 가 도입한 통합 시나리오 12종. 본 PRD 의 IT-S1~S7
+이 그린 상태에서 관측 평면(메트릭 / 대시보드 / 알람) 의 회귀를 가드한다. 상세 정의는
+[`prd-phase3/01-metrics-and-labels.md`](../prd-phase3/01-metrics-and-labels.md) §5,
+[`prd-phase3/02-metrics-endpoint.md`](../prd-phase3/02-metrics-endpoint.md),
+[`prd-phase3/03-grafana-dashboards.md`](../prd-phase3/03-grafana-dashboards.md) §8,
+[`prd-phase3/04-slo-and-alerts.md`](../prd-phase3/04-slo-and-alerts.md) §6 참조.
+
+| ID | 한 줄 | 통과 조건 (요약) |
+|----|-------|-------------------|
+| **IT-OBS-1** | `/metrics` 200 + Content-Type 정합 | api/worker 모드 모두에서 200 + `text/plain; version=0.0.4; charset=utf-8` |
+| **IT-OBS-2** | C1~C11 카탈로그 전건 노출 | `/metrics` 응답에 도메인 무관 메트릭 11종 모두 등장(값 0이어도) |
+| **IT-OBS-3** | `core/` 도메인 격리 | `packages/core/src/**` 에서 도메인 식별자 0건 (IT-R1 보강) |
+| **IT-OBS-4** | D1~D3 (API 메트릭) 카탈로그 전건 노출 | `route`/`method`/`status_class` 라벨 enum 잠금 |
+| **IT-OBS-5** | W1~W4 (웹훅 도메인 메트릭) 카탈로그 전건 노출 | `result`/`http_status_class`/`error_class` enum 폐쇄성 |
+| **IT-OBS-6.S1~S7** | IT-S1~S7 시나리오 ↔ 메트릭 매트릭스 단언 | 각 1~2단계 IT 실행 후 D/W/C 메트릭 변동 PRD §5 표 정합 (S6b 포함) |
+| **IT-OBS-7** | Grafana provisioning YAML 유효성 | datasource/dashboards provider YAML 파일 + 필드 정합 |
+| **IT-OBS-8** | 대시보드 UID 안정성 | 4 JSON 파일의 `uid` 잠금값 일치 |
+| **IT-OBS-9** | 셧다운 진행 중 `/metrics` 200 유지 | draining 상태에서 `/metrics` 200 + `/webhooks` 503 + `/healthz` 503 동시 단언 (Q-OBS-2 (a)) |
+| **IT-OBS-10** | alerting rule YAML 유효성 + PromQL 카탈로그 정합 | 4 rule 파일 구조 단언 + PromQL 메트릭/라벨이 `prd-phase3/01` §3 와 글자 단위 일치 |
+| **IT-OBS-11** | 카디널리티 가드 | 시나리오 전건 실행 후 메트릭당 ≤ 1000 + PRD `01` §4.4 표 상한 준수 (AC3.6) |
+| **IT-OBS-12** | 로그/메트릭 라벨 명명 정합 | 정적 검사: 로그 키 ↔ 메트릭 라벨 매핑(`errorClass↔error_class` 등) 일관 |
+
+> 회귀 보호: 본 PRD 의 IT-S1~S7 가 그린 상태 + IT-OBS-1~12 가 그린 상태가 모든 후속
+> 마일스톤의 진입 조건이다. 본 표가 갱신되면 동시에 `prd-phase3/` 의 단일 출처도 함께
+> 갱신해야 한다 (PRD I5.3 — 글자 단위 정합).
+
 ## 6. 테스트 인프라 / 도구
 
 - **Vitest** — 단일 테스트 러너.
