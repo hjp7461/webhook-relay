@@ -38,6 +38,12 @@ const positiveIntFromString = z
 // LOG_LEVEL 허용값(pino 표준).
 const LogLevelSchema = z.enum(["fatal", "error", "warn", "info", "debug", "trace"]);
 
+// SERVICE_MODE 허용값.
+// - 'all'    — 단일 프로세스에 API + Worker 동거(데모 기본값, IT-S7 자식 호환).
+// - 'api'    — Fastify HTTP 만 실행(워커 미생성). 운영 분리 컨테이너용.
+// - 'worker' — BullMQ Worker 만 실행(HTTP 미생성). `docker compose --scale worker=N`.
+const ServiceModeSchema = z.enum(["all", "api", "worker"]);
+
 const ConfigEnvSchema = z.object({
   // 1단계 키 (M2)
   REDIS_URL: z.string().min(1).default("redis://localhost:6379"),
@@ -89,6 +95,10 @@ const ConfigEnvSchema = z.object({
   SHUTDOWN_TIMEOUT_MS: positiveIntFromString
     .default(30000 as unknown as never)
     .or(z.number().int().positive()),
+
+  // 서비스 모드(api/worker 프로세스 분리). 기본값 'all' 은 단일 프로세스로
+  // 동작하므로 기존 데모 흐름(IT-S7 자식 프로세스 포함)을 회귀시키지 않는다.
+  SERVICE_MODE: ServiceModeSchema.default("all"),
 });
 
 export type AppConfig = z.infer<typeof ConfigEnvSchema>;

@@ -85,6 +85,9 @@ export async function startApp(opts: FixtureOptions): Promise<AppFixture> {
     WORKER_CONCURRENCY: 1,
     API_BEARER_TOKEN: bearerToken,
     ALLOW_PRIVATE_TARGETS: opts.allowPrivateTargets ?? true,
+    // 통합 테스트는 buildServer() 를 직접 호출하므로 SERVICE_MODE 영향이 없지만,
+    // AppConfig 타입이 필드를 요구하므로 명시적으로 'all' 을 부여한다.
+    SERVICE_MODE: "all",
   };
 
   const server = await buildServer(config);
