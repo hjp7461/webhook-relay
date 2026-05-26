@@ -63,12 +63,40 @@ export function enableDefaultMetrics(): void {
 // C1 — webhook_relay_queue_depth (Gauge)
 // ---------------------------------------------------------------------------
 // PRD `prd-phase3/01` §3.1 C1.
-// collect() hook 은 본 모듈이 아닌 wiring 측(`core/queue.ts`)이 설정한다.
+//
+// scrape 시점 collector — 등록된 collector 들을 모두 호출한다. wiring 측
+// (`core/queue.ts`) 이 큐별 collector 를 등록한다(`registerQueueDepthCollector`).
+// 단일 collect() 콜백이 collect-time fan-out 을 수행하므로, 핸들러 hot path
+// 와 무관(PRD `prd-phase3/01` I3.5 보호).
+
+export type QueueDepthCollector = (gauge: Gauge<string>) => Promise<void> | void;
+
+const QUEUE_DEPTH_COLLECTORS: Set<QueueDepthCollector> = new Set();
+
+export function registerQueueDepthCollector(c: QueueDepthCollector): void {
+  QUEUE_DEPTH_COLLECTORS.add(c);
+}
+
+export function unregisterQueueDepthCollector(c: QueueDepthCollector): void {
+  QUEUE_DEPTH_COLLECTORS.delete(c);
+}
 
 export const queueDepth: Gauge<string> = new Gauge({
   name: METRIC_QUEUE_DEPTH,
   help: "Number of jobs in the queue by state (scraped from the broker on demand).",
   labelNames: [LABEL_QUEUE, LABEL_JOB_STATE],
+  async collect(): Promise<void> {
+    if (QUEUE_DEPTH_COLLECTORS.size === 0) return;
+    await Promise.all(
+      Array.from(QUEUE_DEPTH_COLLECTORS).map(async (fn): Promise<void> => {
+        try {
+          await fn(queueDepth);
+        } catch {
+          // best-effort — 일시 단절 시 이전 샘플 유지. 다음 scrape 에서 회복.
+        }
+      }),
+    );
+  },
 });
 
 // ---------------------------------------------------------------------------

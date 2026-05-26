@@ -1,6 +1,8 @@
 import { Queue, type QueueOptions } from "bullmq";
 import type { Redis } from "ioredis";
 
+import { registerQueueForMetrics } from "./queue.js";
+
 // core/dlq.ts
 //
 // DLQ(dead-letter queue) 추상: 별도 BullMQ Queue + 적재할 엔트리 빌더.
@@ -58,10 +60,14 @@ export function createDlqQueue<TData>(
   opts: CreateDlqQueueOptions,
 ): Queue<DlqJobData<TData>, void, string> {
   const { connection, queueOptions } = opts;
-  return new Queue<DlqJobData<TData>, void, string>(name, {
+  const queue = new Queue<DlqJobData<TData>, void, string>(name, {
     ...queueOptions,
     connection,
   });
+  // M-OBS-2: DLQ 도 C1 queue_depth 풀에 등록(별도 `queue` 라벨 값으로 노출 —
+  // PRD `prd-phase3/01` §3.1 C1 정합, §4.2 `queue` enum 정합).
+  registerQueueForMetrics(queue);
+  return queue;
 }
 
 export interface BuildDlqEntryInput<TData> {
