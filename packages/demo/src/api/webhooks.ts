@@ -17,6 +17,12 @@ import {
 export interface WebhooksRouteDeps {
   readonly queue: Queue<WebhookJobData, void, string>;
   readonly bearerToken: string;
+  /**
+   * 셧다운 진행 중 여부. true 면 본 라우트는 어떤 요청도 받지 않고 503 응답.
+   * M7 의 그레이스풀 셧다운 시퀀스가 setDraining(true) 로 토글한다
+   * (Q-SEC-5 (a) 정합 — /healthz 도 503 으로 통일).
+   */
+  readonly isDraining: () => boolean;
 }
 
 export async function registerWebhooksRoute(
@@ -26,7 +32,20 @@ export async function registerWebhooksRoute(
   app.post(ROUTE_WEBHOOKS, {
     // Fastify 라우트 단위로 Authorization 가드를 건다(전역 훅이 healthz/
     // dashboard 를 막지 않도록 의도적으로 라우트 한정).
+    //
+    // M7: draining 중에는 인증 이전에 503 으로 거절(PRD `06` §6.2.3,
+    // AC6.4). draining 응답은 본 단계의 최우선 분기.
     preHandler: async (req, reply) => {
+      if (deps.isDraining()) {
+        await reply.code(503).send({
+          error: {
+            code: ERROR_CODES.SHUTTING_DOWN,
+            message: "Server is shutting down",
+            details: [],
+          },
+        });
+        return;
+      }
       const auth = req.headers["authorization"];
       if (!isValidBearer(auth, deps.bearerToken)) {
         await reply.code(401).send({

@@ -35,4 +35,6 @@ export const ERROR_CODES = {
   UNAUTHORIZED: "ERR_UNAUTHORIZED",
   PAYLOAD_TOO_LARGE: "ERR_PAYLOAD_TOO_LARGE",
   INTERNAL: "ERR_INTERNAL",
+  // M7: 그레이스풀 셧다운 진행 중 신규 요청 거절(AC6.4, Q-SEC-5 (a) 정합).
+  SHUTTING_DOWN: "ERR_SHUTTING_DOWN",
 } as const;

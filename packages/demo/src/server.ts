@@ -38,6 +38,13 @@ export interface BuiltServer {
   readonly worker: Worker<WebhookJobData, void, string>;
   readonly receiverStore: ReceiverStore;
   readonly connection: Redis;
+  /**
+   * 셧다운 진행 중 토글. M7 의 그레이스풀 셧다운 시퀀스가 setDraining(true) 를
+   * 호출하면 /webhooks 와 /healthz 가 503 으로 응답한다(PRD `06` §6.2.3).
+   * /_demo/receiver 와 /dashboard 는 영향을 받지 않는다(PLAN `08` §4-3 권장).
+   */
+  setDraining(value: boolean): void;
+  isDraining(): boolean;
   close(): Promise<void>;
 }
 
@@ -107,6 +114,14 @@ export async function buildServer(config: AppConfig): Promise<BuiltServer> {
 
   const receiverStore = new ReceiverStore();
 
+  // draining 플래그(M7). 시그널 핸들러가 토글하면 /webhooks /healthz 가
+  // 503 응답. 본 모듈 내 closure 로 둔다(외부 의존성 없음).
+  let draining = false;
+  const setDraining = (value: boolean): void => {
+    draining = value;
+  };
+  const isDraining = (): boolean => draining;
+
   const fastify = Fastify({
     logger: {
       level: config.LOG_LEVEL,
@@ -121,10 +136,11 @@ export async function buildServer(config: AppConfig): Promise<BuiltServer> {
   await registerWebhooksRoute(fastify, {
     queue,
     bearerToken: config.API_BEARER_TOKEN,
+    isDraining,
   });
   await registerReceiverRoute(fastify, { store: receiverStore });
   await registerDashboardRoutes(fastify, { queue, dlqQueue });
-  await registerHealthzRoute(fastify, { connection });
+  await registerHealthzRoute(fastify, { connection, isDraining });
 
   // 핸들러 + 워커
   const handler: CoreJobHandler<unknown> = createWebhookDeliveryHandler({
@@ -201,6 +217,8 @@ export async function buildServer(config: AppConfig): Promise<BuiltServer> {
     worker,
     receiverStore,
     connection,
+    setDraining,
+    isDraining,
     close,
   };
 }
