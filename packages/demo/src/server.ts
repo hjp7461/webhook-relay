@@ -123,7 +123,7 @@ export async function buildServer(config: AppConfig): Promise<BuiltServer> {
     bearerToken: config.API_BEARER_TOKEN,
   });
   await registerReceiverRoute(fastify, { store: receiverStore });
-  await registerDashboardRoutes(fastify, { queue });
+  await registerDashboardRoutes(fastify, { queue, dlqQueue });
   await registerHealthzRoute(fastify, { connection });
 
   // 핸들러 + 워커
