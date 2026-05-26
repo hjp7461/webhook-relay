@@ -17,6 +17,7 @@ import {
   type StatusClass,
 } from "../constants.js";
 import {
+  apiRequestBodyBytes,
   apiRequestDurationSeconds,
   apiRequestsTotal,
 } from "../metrics.js";
@@ -144,6 +145,35 @@ export async function registerApiMetricsPlugin(
         { route, method, status_class: statusClass },
         elapsedSec,
       );
+      done();
+    },
+  );
+
+  // D3 — request body bytes. body 가 있는 라우트(POST 등) 한정.
+  // preParsing 단계에서는 raw stream 만 사용 가능하므로, `Content-Length`
+  // 헤더를 신뢰한다(클라이언트가 보낸 헤더 기준). 헤더 부재(chunked 등) 또는
+  // 비수치이면 본 메트릭은 skip — 카디널리티/계측 정확성보다 안정성 우선.
+  app.addHook(
+    "preHandler",
+    (req: FastifyRequest, _reply: FastifyReply, done: HookHandlerDoneFunction): void => {
+      const ctx = (req as RequestWithMetricsCtx)[METRICS_CTX];
+      // D3 는 body 가 있는 POST 라우트에만 의미가 있다 — method != POST 면 skip.
+      if (ctx === undefined || ctx.route === undefined || ctx.method !== "POST") {
+        done();
+        return;
+      }
+      const lenHeader = req.headers["content-length"];
+      const lenStr = Array.isArray(lenHeader) ? lenHeader[0] : lenHeader;
+      if (typeof lenStr !== "string") {
+        done();
+        return;
+      }
+      const bytes = Number.parseInt(lenStr, 10);
+      if (!Number.isFinite(bytes) || bytes < 0) {
+        done();
+        return;
+      }
+      apiRequestBodyBytes.observe({ route: ctx.route }, bytes);
       done();
     },
   );
