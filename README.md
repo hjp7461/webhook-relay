@@ -142,8 +142,10 @@ Producer ──add──> BullMQ Queue ──> Worker pool (수평 확장)
   Docker secrets / Kubernetes Secret / AWS Secrets Manager 같은 비밀 관리 인프라 사용.
 - **Bearer timing-safe 비교:** 현재는 `===`. 운영 노출 전 `crypto.timingSafeEqual`로
   교체(타이밍 공격 회피).
-- **SSRF strict 모드:** `ALLOW_PRIVATE_TARGETS=false`. 현 구현은 hostname 문자열 검사만
-  — 동적 DNS가 사설 IP로 회귀하는 케이스는 잡지 못한다(후속 강화 필요).
+- **SSRF strict 모드:** `ALLOW_PRIVATE_TARGETS=false` 일 때 hostname 문자열 검사 + DNS 조회
+  결과 IP 검사를 모두 적용한다(`packages/demo/src/handlers/deliver.ts` 의 `isPrivateUrl` +
+  `isPrivateIp`). 동적 DNS(`evil.example.com` → `10.0.0.1`)도 차단. DNS lookup timeout 2초
+  도달 시 보수적으로 거부. 운영에서는 `ALLOW_PRIVATE_TARGETS=false` 권장.
 - **HMAC replay 방어:** 현재는 본문 HMAC만(timestamp/nonce 없음, Q-SEC-2 (a)). 운영에서
   replay 위협이 있다면 `X-Webhook-Timestamp` + nonce 도입을 별도 PR로.
 - **API vs Worker 프로세스 분리:** 본 저장소는 단일 Docker 이미지 + `SERVICE_MODE`

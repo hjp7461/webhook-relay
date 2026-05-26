@@ -44,6 +44,10 @@
 - **리다이렉트:** 자동 따라가지 않거나, 최대 1회까지만. SSRF 방어와 함께 `07`.
 - **SSRF 방어:** private CIDR/localhost로의 송신 차단 정책 → `07`. 본 PRD 범위에서는 **데모용으로
   허용**(`http://localhost:3000/_demo/receiver`가 동작해야 하므로) — 단, 위험 명시.
+  운영(`ALLOW_PRIVATE_TARGETS=false`) 시에는 **hostname 문자열 검사 + DNS 조회 결과 IP 검사**
+  두 단계를 모두 적용한다(`packages/demo/src/handlers/deliver.ts`의 `isPrivateUrl` + `isPrivateIp`).
+  동적 DNS 우회(`evil.example.com` → `10.0.0.1`) 차단. DNS 조회 timeout(2초) 도달 시 보수적
+  `NonRetriableError` 로 거부.
 
 ## 4. 시크릿 / 환경변수 관리
 

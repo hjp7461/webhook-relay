@@ -1,7 +1,11 @@
+import { lookup as dnsLookup } from "node:dns/promises";
 import { NonRetriableError } from "@webhook-relay/core";
 import { OUTGOING_HEADER_BLACKLIST } from "../constants.js";
 import { signHmacSha256 } from "../domain/hmac.js";
 import { classifyDeliveryFailure } from "./classify-error.js";
+
+// DNS 조회 자체의 짧은 timeout. 2초 안에 결과가 안 오면 보수적으로 거부.
+const DNS_LOOKUP_TIMEOUT_MS = 2_000;
 
 // demo/handlers/deliver.ts
 //
@@ -41,10 +45,32 @@ export interface DeliverResult {
  * NonRetriableError).
  */
 export async function deliver(input: DeliverInput): Promise<DeliverResult> {
-  if (!input.allowPrivateTargets && isPrivateUrl(input.url)) {
-    throw new NonRetriableError(
-      `Refusing to deliver to private/loopback target (ALLOW_PRIVATE_TARGETS=false)`,
-    );
+  if (!input.allowPrivateTargets) {
+    // 1차 가드: hostname 문자열만으로 빠른 거부(localhost / 점-십진 사설 / IPv6).
+    if (isPrivateUrl(input.url)) {
+      throw new NonRetriableError(
+        `Refusing to deliver to private/loopback target (ALLOW_PRIVATE_TARGETS=false)`,
+      );
+    }
+    // 2차 가드: DNS 조회 결과 IP 가 사설 CIDR 에 속하면 거부. 동적 DNS 우회
+    // (`evil.example.com` → `10.0.0.1`) 차단. DNS 조회 자체가 시간을 소모하므로
+    // 짧은 timeout(보수적으로 거부) 적용.
+    const hostname = extractHostname(input.url);
+    if (hostname !== undefined) {
+      const addrs = await resolveHostAddresses(hostname);
+      if (addrs === "timeout") {
+        throw new NonRetriableError(
+          `Refusing to deliver: DNS lookup timed out (>${DNS_LOOKUP_TIMEOUT_MS}ms)`,
+        );
+      }
+      for (const ip of addrs) {
+        if (isPrivateIp(ip)) {
+          throw new NonRetriableError(
+            `Refusing to deliver to private/loopback target (DNS resolved ${hostname} to private IP)`,
+          );
+        }
+      }
+    }
   }
 
   const sanitizedHeaders = sanitizeOutgoingHeaders(input.headers);
@@ -117,8 +143,52 @@ export function sanitizeOutgoingHeaders(
 }
 
 /**
+ * URL 에서 hostname 만 추출. brackets 가 둘러싼 IPv6 ([::1]) 도 그대로 반환한다
+ * (`URL.hostname` 가 brackets 를 보존하므로 호출 측이 그대로 사용 가능).
+ */
+function extractHostname(rawUrl: string): string | undefined {
+  try {
+    return new URL(rawUrl).hostname;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * hostname 의 모든 A/AAAA 레코드를 짧은 timeout 안에 조회.
+ *
+ * 반환:
+ * - string[] — 조회된 IP 주소 목록(빈 배열 가능).
+ * - "timeout" — DNS 조회가 DNS_LOOKUP_TIMEOUT_MS 안에 응답하지 않음.
+ *
+ * IP 리터럴(`127.0.0.1`, `[::1]`)이 직접 들어와도 dns.lookup 은 그대로 반환한다.
+ * brackets 가 있는 IPv6 hostname 은 brackets 를 벗겨 lookup 에 전달.
+ */
+async function resolveHostAddresses(hostname: string): Promise<string[] | "timeout"> {
+  const stripped =
+    hostname.startsWith("[") && hostname.endsWith("]")
+      ? hostname.slice(1, -1)
+      : hostname;
+  const lookup = dnsLookup(stripped, { all: true }).then((entries) =>
+    entries.map((e) => e.address),
+  );
+  const timeout = new Promise<"timeout">((resolve) =>
+    setTimeout(() => resolve("timeout"), DNS_LOOKUP_TIMEOUT_MS),
+  );
+  try {
+    const result = await Promise.race([lookup, timeout]);
+    return result;
+  } catch {
+    // 조회 자체가 실패(ENOTFOUND 등). 보수적으로 빈 결과 → 외부 IP 로 간주,
+    // 이후 fetch 단계에서 자연스럽게 실패한다. 본 함수의 목적은 사설 IP 의
+    // 명시적 차단이지 "조회 실패 시 차단"이 아니다.
+    return [];
+  }
+}
+
+/**
  * URL 의 호스트명만 보고 보수적으로 사설/루프백/링크로컬을 식별한다.
- * 동적 DNS 조회는 본 단계 범위 외(deliver.ts 도입 시점에 PRD 보강 필요).
+ * 동적 DNS 우회 차단은 별도로 `resolveHostAddresses` + `isPrivateIp` 가 담당한다.
  */
 export function isPrivateUrl(rawUrl: string): boolean {
   let u: URL;
@@ -148,5 +218,63 @@ export function isPrivateUrl(rawUrl: string): boolean {
   if (a === 192 && b === 168) return true;
   // 169.254.0.0/16 (link-local)
   if (a === 169 && b === 254) return true;
+  // 0.0.0.0/8 (unspecified / "this network")
+  if (a === 0) return true;
+  return false;
+}
+
+/**
+ * IP 문자열이 사설/루프백/링크로컬/unspecified 범위인지 판정. 순수 함수
+ * (DNS/네트워크 없음) — 단위 테스트 용이성을 위해 export.
+ *
+ * 다루는 CIDR:
+ * - IPv4: 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16,
+ *         169.254.0.0/16, 0.0.0.0/8
+ * - IPv6: ::1 (loopback), ::  (unspecified), fc00::/7 (unique local),
+ *         fe80::/10 (link-local), ::ffff:0:0/96 mapped IPv4 (재귀 검사)
+ *
+ * IPv6 zone id(`fe80::1%eth0`)는 zone 부분을 제거 후 판정.
+ */
+export function isPrivateIp(ip: string): boolean {
+  if (typeof ip !== "string" || ip.length === 0) return false;
+  // IPv6 zone id 제거.
+  const noZone = ip.includes("%") ? (ip.split("%")[0] ?? "") : ip;
+  const lowered = noZone.toLowerCase();
+
+  // IPv4 점-십진.
+  const ipv4 = lowered.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (ipv4) {
+    const a = Number(ipv4[1]);
+    const b = Number(ipv4[2]);
+    if (![a, b, Number(ipv4[3]), Number(ipv4[4])].every((n) => n >= 0 && n <= 255)) {
+      return false; // 잘못된 옥텟 — 정상 IPv4 가 아님.
+    }
+    // 127.0.0.0/8 / 10.0.0.0/8 / 172.16.0.0/12 / 192.168.0.0/16 /
+    // 169.254.0.0/16 / 0.0.0.0/8
+    if (a === 127) return true;
+    if (a === 10) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 169 && b === 254) return true;
+    if (a === 0) return true;
+    return false;
+  }
+
+  // IPv6.
+  if (lowered.includes(":")) {
+    // unspecified `::` / loopback `::1`
+    if (lowered === "::" || lowered === "::1") return true;
+    // IPv4-mapped IPv6 (`::ffff:10.0.0.1`) — 매핑된 IPv4 부분으로 재귀 판정.
+    const mapped = lowered.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
+    if (mapped && mapped[1]) {
+      return isPrivateIp(mapped[1]);
+    }
+    // fc00::/7 — unique local (fc00..fdff)
+    if (/^f[cd][0-9a-f]{2}:/.test(lowered)) return true;
+    // fe80::/10 — link-local (fe80..febf, 첫 10 비트). 보수적으로 fe80..feff 차단.
+    if (/^fe[89ab][0-9a-f]:/.test(lowered)) return true;
+    return false;
+  }
+
   return false;
 }

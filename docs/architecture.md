@@ -217,7 +217,9 @@ SIGTERM ──► handleSignal()
 ### 보장하지 않는다 (본 PRD 범위 밖)
 - ❌ **exactly-once 전달** — 환상에 가깝다. 멱등성으로 수신자가 흡수.
 - ❌ **HMAC replay 방어** — timestamp/nonce 미적용(Q-SEC-2 (a)). 후속 PRD.
-- ❌ **SSRF DNS 검증** — hostname 문자열 검사만. 동적 DNS 우회 가능성 잔존. 후속 강화.
+- ✅ **SSRF DNS 검증 (env 토글)** — `ALLOW_PRIVATE_TARGETS=false` 일 때 hostname 문자열 검사
+  + `dns.lookup({ all: true })` 결과의 모든 IP 에 `isPrivateIp` 적용(IPv4/IPv6 사설/루프백/
+  링크로컬). 동적 DNS 우회 차단. 데모 기본(`true`)에서는 스킵.
 - ❌ **Bearer timing-safe 비교** — 현재 `===`. 운영 노출 전 `crypto.timingSafeEqual` 권장.
 - ❌ **DLQ 자동 재투입** — Q-DLQ-1 (a). 격리만.
 - ❌ **stalled-limit 초과 시 DLQ 이동** — `failed(job===undefined)` 케이스는 현재 silent return → 페이로드 손실 가능성. 후속 결정 + 정책 필요.
