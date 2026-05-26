@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { Queue } from "bullmq";
-import { randomUUID } from "node:crypto";
+import { addJob } from "@webhook-relay/core";
 import { ROUTE_WEBHOOKS, ERROR_CODES } from "../constants.js";
 import {
   WebhookCreateRequestSchema,
@@ -10,6 +10,7 @@ import {
 // demo/api/webhooks.ts — POST /webhooks
 //
 // 결정 잠금 Q-API-1 (b): Authorization: Bearer <API_BEARER_TOKEN> 검증.
+// Q-API-2 (a): 멱등성 재요청도 `202 Accepted` + 동일 jobId(= idempotencyKey).
 // Q-API-3 (a): 헤더 블랙리스트는 outgoing 송신 측(deliver.ts)에서 적용.
 // Q-API-4 (a): 응답은 { jobId } 만.
 
@@ -53,24 +54,20 @@ export async function registerWebhooksRoute(
         });
       }
 
-      // 큐에 add. M2 에서는 멱등성 처리 없음(M3 의 책임). jobId 는 랜덤.
-      const jobId = randomUUID();
+      // M3: idempotencyKey 를 BullMQ jobId 로 사용한다(PRD `02` §F2.1).
+      // BullMQ 는 동일 jobId 로 add 시 새 작업 생성을 무시하여 중복을 흡수.
+      // Q-API-2 (a) — 멱등성 재요청도 동일 jobId 로 `202` 응답.
+      const idempotencyKey = parsed.data.idempotencyKey;
       const data: WebhookJobData = {
         url: parsed.data.url,
         payload: parsed.data.payload,
+        idempotencyKey,
         ...(parsed.data.headers !== undefined ? { headers: parsed.data.headers } : {}),
-        ...(parsed.data.idempotencyKey !== undefined
-          ? { idempotencyKey: parsed.data.idempotencyKey }
-          : {}),
       };
-      await deps.queue.add("deliver", data, {
-        jobId,
-        // M2 안정성: attempts=1 (PLAN §8 메모). 재시도는 M4 에서 환경변수로 격상.
-        attempts: 1,
-        removeOnComplete: false,
-        removeOnFail: false,
+      const result = await addJob(deps.queue, "deliver", data, {
+        jobId: idempotencyKey,
       });
-      return reply.code(202).send({ jobId });
+      return reply.code(202).send({ jobId: result.jobId });
     },
   });
 }
