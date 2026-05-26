@@ -1,0 +1,31 @@
+# Prometheus scrape config for the webhook-relay demo stack.
+#
+# PRD `prd-phase3/02-metrics-endpoint.md` §7.1, PLAN `05` §4 step 2.
+#
+# - global.scrape_interval 15s : SLO 측정 윈도우(PRD `04`)에 적합.
+# - global.evaluation_interval 15s : alerting rule 평가 주기(M-OBS-5).
+# - scrape_configs: docker-compose 네트워크의 호스트명 `api` (3000) +
+#   `worker` (3001, WORKER_METRICS_PORT). 두 잡 모두 GET /metrics.
+# - rule_files: /etc/prometheus/rules/*.yaml — M-OBS-5 에서 채운다. 본
+#   마일스톤에서는 비어 있는 디렉터리(.gitkeep) 만 마운트. Prometheus 는
+#   매칭 파일 0개를 안전하게 처리한다(글롭 실패 무시).
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/rules/*.yaml
+
+scrape_configs:
+  - job_name: webhook-relay-api
+    metrics_path: /metrics
+    scrape_timeout: 10s
+    static_configs:
+      - targets:
+          - api:3000
+  - job_name: webhook-relay-worker
+    metrics_path: /metrics
+    scrape_timeout: 10s
+    static_configs:
+      - targets:
+          - worker:3001
