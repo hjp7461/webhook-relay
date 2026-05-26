@@ -17,3 +17,7 @@ export type {
 } from "./producer.js";
 
 export { RetriableError, NonRetriableError } from "./errors.js";
+export type { ClassifiedErrorContext } from "./errors.js";
+
+export { delayForAttempt, buildWorkerRetryOptions } from "./retry.js";
+export type { RetryPolicy, WorkerRetryOptions } from "./retry.js";
