@@ -1,5 +1,11 @@
-# M2: api 서비스 추가. 단일 프로세스(API + Worker 동거) MVP — 별도의
-# worker 서비스 분리는 PRD `01` MVP 범위에서 다루지 않는다.
+# API/Worker 프로세스 분리 — 단일 Docker 이미지 + SERVICE_MODE env 분기.
+#
+# 운영 예시:
+#   docker compose up                          # api=1, worker=1, redis=1
+#   docker compose up --scale worker=5 -d     # 워커 수평 확장
+#
+# api 와 worker 는 동일 이미지(packages/demo/Dockerfile)를 공유하며 SERVICE_MODE
+# 환경변수로 모드를 분기한다(packages/demo/src/server.ts).
 services:
   redis:
     image: redis:7-alpine
@@ -22,6 +28,7 @@ services:
       redis:
         condition: service_healthy
     environment:
+      SERVICE_MODE: api
       # 컨테이너 네트워크에서 redis 서비스 호스트 사용.
       REDIS_URL: redis://redis:6379
       PORT: "3000"
@@ -47,4 +54,36 @@ services:
       SHUTDOWN_TIMEOUT_MS: "30000"
     ports:
       - "3000:3000"
+    restart: unless-stopped
+
+  worker:
+    # api 와 동일 이미지. container_name 은 --scale 충돌 회피를 위해 미지정.
+    build:
+      context: .
+      dockerfile: packages/demo/Dockerfile
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      SERVICE_MODE: worker
+      REDIS_URL: redis://redis:6379
+      LOG_LEVEL: info
+      # api 와 동일한 시크릿/큐/재시도 설정 — 같은 큐를 소비해야 하므로 같은 값.
+      API_BEARER_TOKEN: ${API_BEARER_TOKEN:?Set API_BEARER_TOKEN (>=32 bytes) in .env or shell}
+      WEBHOOK_HMAC_SECRET: ${WEBHOOK_HMAC_SECRET:?Set WEBHOOK_HMAC_SECRET (>=32 bytes) in .env or shell}
+      ALLOW_PRIVATE_TARGETS: "true"
+      WEBHOOK_MAX_PAYLOAD_BYTES: "65536"
+      WEBHOOK_DELIVERY_TIMEOUT_MS: "5000"
+      QUEUE_NAME: webhook-delivery
+      DLQ_NAME: webhook-delivery-dlq
+      WORKER_CONCURRENCY: "5"
+      REDIS_RECONNECT_BASE_MS: "200"
+      REDIS_RECONNECT_MAX_MS: "10000"
+      WEBHOOK_MAX_ATTEMPTS: "5"
+      WEBHOOK_BACKOFF_BASE_MS: "1000"
+      WEBHOOK_HMAC_HEADER: X-Webhook-Signature
+      STALLED_INTERVAL_MS: "30000"
+      MAX_STALLED_COUNT: "1"
+      SHUTDOWN_TIMEOUT_MS: "30000"
+    # 노출 포트 없음(HTTP 미생성).
     restart: unless-stopped
