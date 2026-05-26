@@ -26,18 +26,20 @@ docker compose up
 # Grafana: http://localhost:3001
 ```
 
+기본 `docker compose up` 은 `api` 와 `worker` 를 각 1개, Redis 1개를 띄운다.
+두 서비스는 동일 Docker 이미지를 공유하며 `SERVICE_MODE` 환경변수(`api` /
+`worker`)로 모드를 분기한다. 워커 수평 확장은 다음과 같다.
+
+```bash
+docker compose up --scale worker=5 -d
+```
+
 웹훅 작업 하나 등록해 보기:
 
 ```bash
 curl -X POST http://localhost:3000/webhooks \
   -H 'Content-Type: application/json' \
   -d '{ "url": "http://localhost:3000/_test/receiver", "payload": { "hello": "world" } }'
-```
-
-워커를 늘려서 수평 확장 확인:
-
-```bash
-docker compose up --scale worker=5
 ```
 
 ---
@@ -52,6 +54,9 @@ Producer ──add──> BullMQ Queue ──> Worker pool (수평 확장)
                                   메트릭 기록      최대 초과 → DLQ
 관측성: 처리량/지연/대기열 길이/DLQ → Prometheus → Grafana
 ```
+
+> "Worker pool (수평 확장)" 은 `SERVICE_MODE=worker` 컨테이너의 실제 분리된
+> 워커 풀이다. `docker compose up --scale worker=N` 으로 인스턴스를 늘린다.
 
 | 컴포넌트 | 역할 |
 |----------|------|
@@ -141,8 +146,11 @@ Producer ──add──> BullMQ Queue ──> Worker pool (수평 확장)
   — 동적 DNS가 사설 IP로 회귀하는 케이스는 잡지 못한다(후속 강화 필요).
 - **HMAC replay 방어:** 현재는 본문 HMAC만(timestamp/nonce 없음, Q-SEC-2 (a)). 운영에서
   replay 위협이 있다면 `X-Webhook-Timestamp` + nonce 도입을 별도 PR로.
-- **API vs Worker 프로세스 분리:** 본 PRD MVP는 단일 프로세스. 운영에서는 두 역할을
-  별도 컨테이너로 띄우고 워커만 수평 확장하는 것이 일반적이다(4단계 PRD 영역).
+- **API vs Worker 프로세스 분리:** 본 저장소는 단일 Docker 이미지 + `SERVICE_MODE`
+  env(`all` / `api` / `worker`)로 두 역할을 분리할 수 있다. `docker-compose.yml` 은
+  `api` 와 `worker` 를 별도 서비스로 띄우며, 워커만 `docker compose up --scale worker=N`
+  으로 수평 확장한다. 운영에서는 워커를 별도 오토스케일링 그룹으로 운영해 부하 변동을
+  흡수할 수 있다. (`SERVICE_MODE=all` 은 데모/단일 프로세스 기본값.)
 - **Redis 운영:** 본 데모는 단일 Redis 인스턴스. HA가 필요하면 Redis Sentinel 또는
   Cluster 구성, BullMQ의 `connection` 옵션 갱신 필요.
 - **DLQ 운영 절차:** 자동 재투입은 본 PRD 범위 밖(Q-DLQ-1). 운영자가 DLQ를 주기적으로

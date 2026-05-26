@@ -29,6 +29,7 @@ Redis(BullMQ) 기반의 **at-least-once 웹훅 전송 작업 큐**. 외부로의
 | **Domain Schemas** | `packages/demo/src/domain/schemas.ts`, `idempotency-key.ts`, `hmac.ts` | Zod 경계 파싱, 멱등성 키 검증, HMAC-SHA256 결정성 서명 |
 | **Config** | `packages/demo/src/config.ts` | 환경변수 Zod fail-fast 파싱(시크릿 ≥ 32 bytes) |
 | **Receiver Store** | `packages/demo/src/receiver/store.ts` | 데모 수신자의 최근 N건 in-memory FIFO |
+| **Service Mode** | `packages/demo/src/server.ts` `main()` | `SERVICE_MODE` env (`all` / `api` / `worker`)로 프로세스 모드 분기. `all` = 단일 프로세스(데모 기본값, IT-S7 자식 호환), `api` = Fastify 만, `worker` = BullMQ Worker 만. 동일 이미지를 `docker compose up --scale worker=N` 으로 수평 확장 |
 
 ### 패키지 경계 (CLAUDE.md §3)
 
