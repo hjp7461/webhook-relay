@@ -1,8 +1,8 @@
 ---
-description: webhook-relay 세션 핸드오프 — /clear 후 본 명령으로 컨텍스트를 다시 로드한다.
+description: webhook-relay 세션 핸드오프 로드 — /clear 후 본 명령으로 .claude/state/HANDOFF.md 를 1차 컨텍스트로 다시 로드한다.
 ---
 
-# 🔁 Resume — webhook-relay 핸드오프
+# 🔁 Load State — webhook-relay 핸드오프
 
 당신은 이 저장소(`webhook-relay`)에서 **이전 세션의 작업을 이어받습니다**. 본 명령의 임무는 다음과 같다.
 
@@ -75,7 +75,7 @@ grep -riE '\b(webhook|delivery|fastify|receiver|_demo|Payload)\b' packages/core/
 
 ## 4. 작업에 적용할 패턴 (본 저장소에서 확립된 규약)
 
-본 세션이 이 패턴을 따른다는 전제로 사용자가 `/resume` 을 호출했다고 간주한다.
+본 세션이 이 패턴을 따른다는 전제로 사용자가 `/load-state` 을 호출했다고 간주한다.
 
 1. **PRD → PLAN → 구현** 순서. 각 단계 끝에 commit + push.
 2. **결정은 사용자에게.** 트레이드오프가 있으면 `AskUserQuestion` 으로 묻는다. 임의 결정 금지(CLAUDE.md §7-4).
@@ -107,4 +107,4 @@ grep -riE '\b(webhook|delivery|fastify|receiver|_demo|Payload)\b' packages/core/
 
 세션 종료 직전(또는 사용자가 `/clear` 를 예고할 때) **`/save-state`** 을 권장. 본 명령은 `.claude/state/HANDOFF.md` 를 갱신 + commit + push 해 다음 세션이 정확한 위치에서 재개할 수 있게 한다.
 
-> `/save-state` 가 호출되지 않으면 HANDOFF.md 는 직전 스냅샷에 머무른다 — `/resume` 의 §3 재검증이 차이를 잡지만, 차이가 클수록 더 많은 추론이 필요해 비용이 증가한다.
+> `/save-state` 가 호출되지 않으면 HANDOFF.md 는 직전 스냅샷에 머무른다 — `/load-state` 의 §3 재검증이 차이를 잡지만, 차이가 클수록 더 많은 추론이 필요해 비용이 증가한다.

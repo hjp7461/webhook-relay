@@ -1,6 +1,6 @@
 # Handoff Snapshot
 
-> **자동 생성/갱신 파일.** `/save-state` 명령이 갱신하고, `/resume` 명령이 읽는다.
+> **자동 생성/갱신 파일.** `/save-state` 명령이 갱신하고, `/load-state` 명령이 읽는다.
 > 본 파일은 **시점 스냅샷**이지 단일 출처가 아니다. 새 세션은 항상 본 파일을 1차 컨텍스트로 받되, **git/PLAN/테스트로 재검증**한 뒤 작업을 시작한다.
 
 ---
@@ -77,7 +77,7 @@ PLAN 본문: `docs/plan-phase3/02-m-obs-1-bootstrap.md` ~ `07-m-obs-6-refinement
 ## Recent commits (head → 5개)
 
 ```
-62edb52 chore: add /resume slash command for cross-session handoff
+62edb52 chore: add /load-state slash command for cross-session handoff
 859ba48 docs(readme): update roadmap with M-OBS-1 done + service split + test count
 94ccdbb fix(test): swallow BullMQ idle-close ioredis rejection globally in IT setup
 00706aa fix(test): install unhandled handler at module load for worker metrics IT
