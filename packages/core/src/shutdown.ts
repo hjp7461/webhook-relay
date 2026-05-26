@@ -39,8 +39,13 @@ export interface ShutdownHttpServer {
 }
 
 export interface GracefulShutdownInput {
-  readonly worker: Worker;
-  readonly queue: Queue;
+  /**
+   * BullMQ Worker. API 전용(HTTP 만) 셧다운에서는 워커가 없으므로 optional.
+   * 'worker' 모드와 'all' 모드는 본 필드를 주입한다.
+   */
+  readonly worker?: Worker;
+  /** 메인 큐. 부재 시 close 단계가 skip 된다. */
+  readonly queue?: Queue;
   /** DLQ 큐. 없을 수도 있다(다른 데모 트랙 호환). */
   readonly dlqQueue?: Queue;
   readonly redis: Redis;
@@ -50,6 +55,7 @@ export interface GracefulShutdownInput {
   /**
    * 타임아웃 도달 시 호출. ids 는 워커가 active 상태로 보유 중인 작업 ID 목록.
    * 호출 측은 본 콜백에서 구조화 로그를 남긴다(PRD `06` §6.2.5).
+   * 워커가 없으면 호출되지 않는다(타임아웃 race 가 의미 없음).
    */
   readonly onTimeout?: (remainingIds: string[]) => void;
 }
@@ -86,44 +92,49 @@ export async function gracefulShutdown(
 
   // (2) worker.close(false) 와 timeout race.
   //     BullMQ Worker.close(force=false) 는 active 작업을 기다린다.
+  //     worker 가 없는 모드(API 전용)에서는 race 자체가 의미 없으므로 skip.
   let timedOut = false;
-  const closePromise = worker.close(false).catch(() => {
-    // close 자체 실패는 무시(best-effort). timeout 분기로 떨어지지 않게 swallow.
-  });
-  const timeoutPromise = new Promise<"__timeout__">((resolve) => {
-    setTimeout(() => resolve("__timeout__"), timeoutMs);
-  });
-  const raceResult = await Promise.race([
-    closePromise.then(() => "__closed__" as const),
-    timeoutPromise,
-  ]);
+  if (worker !== undefined) {
+    const closePromise = worker.close(false).catch(() => {
+      // close 자체 실패는 무시(best-effort). timeout 분기로 떨어지지 않게 swallow.
+    });
+    const timeoutPromise = new Promise<"__timeout__">((resolve) => {
+      setTimeout(() => resolve("__timeout__"), timeoutMs);
+    });
+    const raceResult = await Promise.race([
+      closePromise.then(() => "__closed__" as const),
+      timeoutPromise,
+    ]);
 
-  if (raceResult === "__timeout__") {
-    timedOut = true;
-    // 잔여 active 작업 ID 수집. BullMQ 의 Queue.getJobs(['active']) 로
-    // 큐 단위로 조회한다(Worker 에는 getJobs 가 없다).
-    let remainingIds: string[] = [];
-    try {
-      const activeJobs = await queue.getJobs(["active"]);
-      remainingIds = activeJobs
-        .map((j) => j.id)
-        .filter((id): id is string => typeof id === "string" && id.length > 0);
-    } catch {
-      // 조회 실패 시 빈 배열로 둔다(타임아웃 시점에 Redis 가 불안정할 수 있음).
-      remainingIds = [];
-    }
-    if (onTimeout !== undefined) {
-      try {
-        onTimeout(remainingIds);
-      } catch {
-        // 콜백 자체의 에러는 셧다운 흐름을 막지 않는다.
+    if (raceResult === "__timeout__") {
+      timedOut = true;
+      // 잔여 active 작업 ID 수집. BullMQ 의 Queue.getJobs(['active']) 로
+      // 큐 단위로 조회한다(Worker 에는 getJobs 가 없다).
+      let remainingIds: string[] = [];
+      if (queue !== undefined) {
+        try {
+          const activeJobs = await queue.getJobs(["active"]);
+          remainingIds = activeJobs
+            .map((j) => j.id)
+            .filter((id): id is string => typeof id === "string" && id.length > 0);
+        } catch {
+          // 조회 실패 시 빈 배열로 둔다(타임아웃 시점에 Redis 가 불안정할 수 있음).
+          remainingIds = [];
+        }
       }
-    }
-    // 강제 close. 진행 중 작업은 BullMQ 가 stalled 로 회수 대상이 된다(M6).
-    try {
-      await worker.close(true);
-    } catch {
-      // best-effort
+      if (onTimeout !== undefined) {
+        try {
+          onTimeout(remainingIds);
+        } catch {
+          // 콜백 자체의 에러는 셧다운 흐름을 막지 않는다.
+        }
+      }
+      // 강제 close. 진행 중 작업은 BullMQ 가 stalled 로 회수 대상이 된다(M6).
+      try {
+        await worker.close(true);
+      } catch {
+        // best-effort
+      }
     }
   }
 
@@ -134,11 +145,13 @@ export async function gracefulShutdown(
     // best-effort
   }
 
-  // (4) 큐/DLQ/Redis 정리.
-  try {
-    await queue.close();
-  } catch {
-    // best-effort
+  // (4) 큐/DLQ/Redis 정리. 있는 것만 close.
+  if (queue !== undefined) {
+    try {
+      await queue.close();
+    } catch {
+      // best-effort
+    }
   }
   if (dlqQueue !== undefined) {
     try {
