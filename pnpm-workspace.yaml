@@ -1,2 +1,7 @@
 packages:
   - "packages/*"
+
+# vitest transitive 의존성 esbuild 의 post-install 빌드 스크립트 실행 허용.
+# pnpm 의 보수적 정책상 명시적으로 true 로 켠다.
+allowBuilds:
+  esbuild: true
