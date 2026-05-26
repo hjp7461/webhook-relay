@@ -42,6 +42,21 @@ export interface CreateWorkerOptions<TData> {
   /** BullMQ Worker 옵션. attempts 등 도메인 정책은 호출 측 결정. */
   readonly workerOptions?: Omit<WorkerOptions, "connection">;
   /**
+   * BullMQ stalled 체크 주기(ms). 운영 기본 30000ms(Q-STALL-1 (a)).
+   * 본 값은 BullMQ Worker 옵션에 그대로 위임된다 — 자체 stalled 매니저는
+   * 구현하지 않는다(PRD `02` §F2.5).
+   *
+   * `workerOptions.stalledInterval` 과 동시에 설정된 경우 본 옵션이 우선한다
+   * (호출 측의 명시적 단일 채널을 보장하기 위함 — demo 의 STALLED_INTERVAL_MS
+   * env 가 이 경로로 들어온다).
+   */
+  readonly stalledInterval?: number;
+  /**
+   * stalled 로 마킹되는 최대 횟수. 운영 기본 1(Q-STALL-1 (a)).
+   * BullMQ Worker 옵션에 그대로 위임된다.
+   */
+  readonly maxStalledCount?: number;
+  /**
    * 주입식 DLQ 큐. 주어지면 워커는 'failed' 이벤트에서
    * NonRetriable 또는 attempts 소진 케이스를 식별해 DLQ.add 로 새 항목을
    * 적재한다. 도메인 식별자는 받지 않으며, 큐 이름과 모양만 의존한다.
@@ -64,7 +79,14 @@ export function createWorker<TData>(
   handler: CoreJobHandler<TData>,
   opts: CreateWorkerOptions<TData>,
 ): Worker<TData, void, string> {
-  const { connection, workerOptions, dlqQueue } = opts;
+  const { connection, workerOptions, stalledInterval, maxStalledCount, dlqQueue } = opts;
+  // stalledInterval / maxStalledCount 단일 채널: workerOptions 의 동명 키보다
+  // 본 모듈의 명시적 옵션이 우선한다(undefined 면 workerOptions 값을 그대로 사용).
+  const mergedWorkerOptions: Omit<WorkerOptions, "connection"> = {
+    ...workerOptions,
+    ...(stalledInterval !== undefined ? { stalledInterval } : {}),
+    ...(maxStalledCount !== undefined ? { maxStalledCount } : {}),
+  };
   const worker = new Worker<TData, void, string>(
     name,
     async (job: Job<TData, void, string>) => {
@@ -89,7 +111,7 @@ export function createWorker<TData>(
       }
     },
     {
-      ...workerOptions,
+      ...mergedWorkerOptions,
       connection,
     },
   );
