@@ -3,17 +3,23 @@ import type { Redis } from "ioredis";
 import { NonRetriableError, RetriableError } from "./errors.js";
 import { buildDlqEntry, type DlqJobData, type DlqLastError } from "./dlq.js";
 import {
+  DLQ_REASON_MAX_ATTEMPTS_EXCEEDED,
+  DLQ_REASON_NON_RETRIABLE,
+  DLQ_REASON_STALLED_LOSS_RECOVERED,
   JOB_STATE_COMPLETED,
   JOB_STATE_FAILED,
   LABEL_JOB_STATE,
   LABEL_OUTCOME,
   LABEL_QUEUE,
+  LABEL_REASON,
   OUTCOME_NON_RETRIABLE_ERROR,
   OUTCOME_RETRIABLE_ERROR,
   OUTCOME_SUCCESS,
   type AttemptOutcome,
+  type DlqReason,
 } from "./constants.js";
 import {
+  dlqJobsTotal,
   jobAttemptsTotal,
   jobsProcessedTotal,
   workerActiveJobs,
@@ -305,6 +311,9 @@ async function handleStalledLossForDlq<TData>(
     data: entry.data,
     lastError,
   });
+  // M-OBS-2 C5 — DLQ 적재 직전 reason 라벨로 카운터 +1.
+  const reason: DlqReason = DLQ_REASON_STALLED_LOSS_RECOVERED;
+  dlqJobsTotal.inc({ [LABEL_REASON]: reason });
   await dlqQueue.add(jobName, dlqEntry);
 }
 
@@ -340,6 +349,13 @@ async function handleFailedForDlq<TData>(
     data: job.data,
     lastError,
   });
+
+  // M-OBS-2 C5 — DLQ 적재 직전 reason 라벨로 카운터 +1. NonRetriable 분류가
+  // 우선(즉시 격리 경로). 그 외는 max_attempts_exceeded.
+  const reason: DlqReason = isNonRetriable
+    ? DLQ_REASON_NON_RETRIABLE
+    : DLQ_REASON_MAX_ATTEMPTS_EXCEEDED;
+  dlqJobsTotal.inc({ [LABEL_REASON]: reason });
 
   // 새 항목으로 적재. dlqQueue.add 의 첫 인자는 BullMQ job 이름.
   // 본 모듈은 도메인 식별자를 모르므로 원본 worker name 을 그대로 사용.
