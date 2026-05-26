@@ -65,7 +65,7 @@ grep -riE '\b(webhook|delivery|fastify|receiver|_demo|Payload)\b' packages/core/
 ```markdown
 # Handoff Snapshot
 
-> **자동 생성/갱신 파일.** `/checkpoint` 명령이 갱신하고, `/resume` 명령이 읽는다.
+> **자동 생성/갱신 파일.** `/save-state` 명령이 갱신하고, `/resume` 명령이 읽는다.
 > 본 파일은 **시점 스냅샷**이지 단일 출처가 아니다. 새 세션은 항상 본 파일을 1차 컨텍스트로 받되, **git/PLAN/테스트로 재검증**한 뒤 작업을 시작한다.
 
 ---
@@ -128,7 +128,7 @@ PLAN 본문: `docs/plan-phase3/0X-...md` ~ `0Y-...md`.
 
 ---
 
-## Notes (자유 메모, /checkpoint 시 누적/정리)
+## Notes (자유 메모, /save-state 시 누적/정리)
 
 - <보존할 메모 + 새로 추가할 메모>
 ```

@@ -1,6 +1,6 @@
 # Handoff Snapshot
 
-> **자동 생성/갱신 파일.** `/checkpoint` 명령이 갱신하고, `/resume` 명령이 읽는다.
+> **자동 생성/갱신 파일.** `/save-state` 명령이 갱신하고, `/resume` 명령이 읽는다.
 > 본 파일은 **시점 스냅샷**이지 단일 출처가 아니다. 새 세션은 항상 본 파일을 1차 컨텍스트로 받되, **git/PLAN/테스트로 재검증**한 뒤 작업을 시작한다.
 
 ---
@@ -88,7 +88,7 @@ d9ca31a fix(test): swallow benign ioredis "Connection is closed" in worker metri
 
 ---
 
-## Notes (자유 메모, /checkpoint 시 누적/정리)
+## Notes (자유 메모, /save-state 시 누적/정리)
 
 - M-OBS-1 PLAN 의 `http` token deviation 외 다른 PLAN-구현 불일치는 없음.
 - 통합 테스트 setup 파일(`vitest.integration-setup.ts`) 이 BullMQ idle close 의 `Connection is closed.` unhandled rejection 만 정확히 swallow — 다른 unhandled 는 그대로 throw.
