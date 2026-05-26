@@ -15,6 +15,7 @@ export const ROUTE_DEMO_RECEIVER = "/_demo/receiver";
 export const ROUTE_DASHBOARD = "/dashboard";
 export const ROUTE_HEALTHZ = "/healthz";
 export const ROUTE_QUEUE_STATS = "/api/queue/stats";
+export const ROUTE_METRICS = "/metrics";
 
 // 외부 송신 시 차단하는 헤더 블랙리스트(결정 잠금 Q-API-3 (a)).
 // 비교는 대소문자 무시.

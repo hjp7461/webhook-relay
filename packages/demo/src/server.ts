@@ -21,6 +21,7 @@ import { registerWebhooksRoute } from "./api/webhooks.js";
 import { registerReceiverRoute } from "./api/receiver.js";
 import { registerDashboardRoutes } from "./api/dashboard.js";
 import { registerHealthzRoute } from "./api/healthz.js";
+import { registerMetricsRoute } from "./api/metrics.js";
 import { createWebhookDeliveryHandler } from "./handlers/webhook-delivery.js";
 import type { WebhookJobData } from "./domain/schemas.js";
 import {
@@ -238,6 +239,7 @@ export async function buildServer(config: AppConfig): Promise<BuiltServer> {
   await registerReceiverRoute(fastify, { store: receiverStore });
   await registerDashboardRoutes(fastify, { queue, dlqQueue });
   await registerHealthzRoute(fastify, { connection, isDraining });
+  await registerMetricsRoute(fastify);
 
   // 핸들러 + 워커
   const handler: CoreJobHandler<unknown> = createWebhookDeliveryHandler({
@@ -345,6 +347,7 @@ export async function buildApiServer(config: AppConfig): Promise<BuiltApiServer>
   await registerReceiverRoute(fastify, { store: receiverStore });
   await registerDashboardRoutes(fastify, { queue, dlqQueue });
   await registerHealthzRoute(fastify, { connection, isDraining });
+  await registerMetricsRoute(fastify);
 
   const facade = makeFacade(queue);
 
