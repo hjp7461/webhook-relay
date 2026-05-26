@@ -95,9 +95,12 @@ async function startStubReceiver(): Promise<StubReceiver> {
 
 /**
  * OS 에서 빈 TCP 포트 하나를 잡고 즉시 해제하여 그 번호를 반환한다.
- * config Zod 가 PORT 를 positive integer 로만 허용하므로(0 미허용) 자식 프로세스에
- * 동적 포트를 명시 전달하기 위한 우회. close→listen 사이의 race window 가 작지만
- * 테스트 격리 환경에서 충분히 안전.
+ *
+ * NOTE: config Zod 의 PORT 가 이제 0 을 허용하므로(OS 자동 할당), 본 우회는
+ * 향후 제거 가능하다. 다만 현재는 자식 프로세스가 listen 한 실제 포트를
+ * 안정적으로 stdout 에서 파싱해 IT-S7 가 그린이라, 리팩터링 위험을 회피하기
+ * 위해 유지한다. PORT=0 직접 전달 + stdout JSON `address` 파싱 경로는 차후
+ * spawn-server 에서 정리.
  */
 async function pickFreePort(): Promise<number> {
   return new Promise<number>((resolve, reject) => {

@@ -43,6 +43,13 @@ describe("UT-4 parseConfig", () => {
     expect(() => parseConfig({ ...BASE_ENV, PORT: "abc" })).toThrow();
   });
 
+  it("accepts PORT=0 (OS-assigned port binding)", () => {
+    // M7 자식 프로세스 우회 청산 — fixture/spawn-server 가 자식에 PORT=0 을 그대로
+    // 전달할 수 있어야 한다(이전엔 positive 만 허용해 pickFreePort 가 필요했음).
+    const cfg = parseConfig({ ...BASE_ENV, PORT: "0" });
+    expect(cfg.PORT).toBe(0);
+  });
+
   it("rejects when API_BEARER_TOKEN is missing", () => {
     const { API_BEARER_TOKEN: _omit, ...rest } = BASE_ENV;
     expect(() => parseConfig(rest)).toThrow();

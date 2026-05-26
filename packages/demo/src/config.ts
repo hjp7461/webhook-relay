@@ -35,6 +35,16 @@ const positiveIntFromString = z
     message: "must be a positive integer",
   });
 
+// PORT 전용 강제. 0 을 허용한다(OS 자동 포트 할당; IT-S7/in-process fixture
+// 가 자식 프로세스에 PORT=0 을 그대로 전달할 수 있도록). 상한은 65535.
+const portIntFromString = z
+  .string()
+  .regex(/^\d+$/, "must be a non-negative integer string")
+  .transform((v) => Number.parseInt(v, 10))
+  .refine((n) => Number.isInteger(n) && n >= 0 && n <= 65535, {
+    message: "must be an integer in [0, 65535]",
+  });
+
 // LOG_LEVEL 허용값(pino 표준).
 const LogLevelSchema = z.enum(["fatal", "error", "warn", "info", "debug", "trace"]);
 
@@ -47,7 +57,11 @@ const ServiceModeSchema = z.enum(["all", "api", "worker"]);
 const ConfigEnvSchema = z.object({
   // 1단계 키 (M2)
   REDIS_URL: z.string().min(1).default("redis://localhost:6379"),
-  PORT: positiveIntFromString.default(3000 as unknown as never).or(z.number().int().positive()),
+  // PORT 는 0 을 허용한다(OS 가 빈 포트 할당; 자식 프로세스에 PORT=0 그대로 전달
+  // 가능). 기본 3000 유지.
+  PORT: portIntFromString
+    .default(3000 as unknown as never)
+    .or(z.number().int().min(0).max(65535)),
   LOG_LEVEL: LogLevelSchema.default("info"),
   WEBHOOK_MAX_PAYLOAD_BYTES: positiveIntFromString
     .default(65536 as unknown as never)
