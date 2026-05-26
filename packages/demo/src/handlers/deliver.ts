@@ -1,16 +1,20 @@
 import { NonRetriableError } from "@webhook-relay/core";
 import { OUTGOING_HEADER_BLACKLIST } from "../constants.js";
+import { signHmacSha256 } from "../domain/hmac.js";
+import { classifyDeliveryFailure } from "./classify-error.js";
 
 // demo/handlers/deliver.ts
 //
 // 외부로의 HTTP 송신 책임 모듈.
 //
 // - 내장 fetch + AbortController 타임아웃(AC6.1, I6.2).
-// - 헤더 블랙리스트(Q-API-3 (a)) 적용.
+// - 헤더 블랙리스트(Q-API-3 (a)) 적용. HMAC 헤더는 블랙리스트와 별개로 항상 부착.
 // - SSRF 가드(Q-SEC-1 (b)): ALLOW_PRIVATE_TARGETS=false 면 private/localhost 거부.
-// - 자동 redirect 비활성(보수적; Q-RETRY-1 (a)).
-// - HMAC 서명은 본 M2 에서 적용하지 않는다(N1.3 — M4 의 책임).
-// - 본 M2 에서는 응답 분류 함수가 없으므로 모든 비-2xx 를 일단 Error 로 throw.
+// - 자동 redirect 비활성(Q-RETRY-1 (a) — 3xx 는 NonRetriable 로 분류).
+// - HMAC 서명(M4): 송신 직전 raw body 에 대해 sha256 서명을 만들어
+//   `hmacHeaderName` 헤더로 부착(PRD `06` §2). 시크릿은 큐 페이로드에 저장하지 않음.
+// - 분류(M4): 비-2xx 또는 네트워크 에러 → classifyDeliveryFailure 로
+//   RetriableError / NonRetriableError 매핑 후 throw(F2.2, I2.3).
 
 export interface DeliverInput {
   readonly url: string;
@@ -18,6 +22,10 @@ export interface DeliverInput {
   readonly headers?: Readonly<Record<string, string>>;
   readonly timeoutMs: number;
   readonly allowPrivateTargets: boolean;
+  /** HMAC-SHA256 시크릿(>= 32 bytes). 환경변수에서 워커가 직접 주입. */
+  readonly hmacSecret: string;
+  /** HMAC 서명 헤더 이름. 환경변수 WEBHOOK_HMAC_HEADER. */
+  readonly hmacHeaderName: string;
 }
 
 export interface DeliverResult {
@@ -26,11 +34,11 @@ export interface DeliverResult {
 }
 
 /**
- * 외부 URL 로 JSON 페이로드를 POST 한다. 비-2xx 면 throw.
+ * 외부 URL 로 JSON 페이로드를 POST 한다.
  *
- * SSRF 차단은 호스트명 기반의 보수적 검사만 수행한다(localhost / 사설 IPv4 /
- * 링크로컬 / IPv6 ::1 / fc00::/7). DNS 조회를 통한 동적 IP 해석은 본 단계
- * 범위 외이며 보강은 후속 PRD 결정에 따른다.
+ * 성공(2xx) 시 DeliverResult 반환. 비-2xx 또는 네트워크 에러 시
+ * classifyDeliveryFailure 결과를 throw 한다(RetriableError 또는
+ * NonRetriableError).
  */
 export async function deliver(input: DeliverInput): Promise<DeliverResult> {
   if (!input.allowPrivateTargets && isPrivateUrl(input.url)) {
@@ -41,26 +49,36 @@ export async function deliver(input: DeliverInput): Promise<DeliverResult> {
 
   const sanitizedHeaders = sanitizeOutgoingHeaders(input.headers);
   const body = JSON.stringify(input.payload ?? {});
+  // HMAC 서명 — raw body 에 대해 결정성(Q-SEC-2 (a)). 송신 직전 생성.
+  const signature = signHmacSha256(input.hmacSecret, body);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), input.timeoutMs);
   const start = Date.now();
   try {
-    const res = await fetch(input.url, {
-      method: "POST",
-      headers: {
-        ...sanitizedHeaders,
-        "content-type": "application/json",
-      },
-      body,
-      // 보수적: 자동 리다이렉트 금지(SSRF/체인 우려). 분류는 M4 에서.
-      redirect: "manual",
-      signal: controller.signal,
-    });
+    let res: Response;
+    try {
+      res = await fetch(input.url, {
+        method: "POST",
+        headers: {
+          ...sanitizedHeaders,
+          "content-type": "application/json",
+          // HMAC 헤더는 블랙리스트와 별개로 항상 부착(서명 무결성 보장).
+          [input.hmacHeaderName]: signature,
+        },
+        body,
+        // 보수적: 자동 리다이렉트 금지(SSRF/체인 우려, Q-RETRY-1 (a)).
+        redirect: "manual",
+        signal: controller.signal,
+      });
+    } catch (cause) {
+      // 네트워크 에러(타임아웃 AbortError / DNS / ECONNREFUSED 등).
+      // classifyDeliveryFailure 가 RetriableError(보수적) 로 매핑.
+      throw classifyDeliveryFailure({ cause });
+    }
     const durationMs = Date.now() - start;
     if (res.status >= 200 && res.status < 300) {
-      // 응답 body 는 본 단계에서 소비하지 않는다(데모 수신자는 200 OK + 빈 본문이면 충분).
-      // 단, 연결 누수를 피하기 위해 body 를 drain.
+      // 연결 누수를 피하기 위해 body drain.
       try {
         await res.arrayBuffer();
       } catch {
@@ -68,8 +86,14 @@ export async function deliver(input: DeliverInput): Promise<DeliverResult> {
       }
       return { status: res.status, durationMs };
     }
-    // M2: 응답 분류 함수가 없어 모든 비-2xx 는 일반 Error 로 throw.
-    throw new Error(`Outgoing request failed with status ${res.status}`);
+    // 비-2xx 응답 — 분류 함수로 매핑.
+    // 응답 body 는 drain 후 폐기(다음 시도/로깅에 사용하지 않음 — 본 PRD 범위).
+    try {
+      await res.arrayBuffer();
+    } catch {
+      // best-effort drain.
+    }
+    throw classifyDeliveryFailure({ httpStatus: res.status });
   } finally {
     clearTimeout(timer);
   }

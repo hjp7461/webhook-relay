@@ -75,6 +75,8 @@ export async function buildServer(config: AppConfig): Promise<BuiltServer> {
   const handler: CoreJobHandler<unknown> = createWebhookDeliveryHandler({
     deliveryTimeoutMs: config.WEBHOOK_DELIVERY_TIMEOUT_MS,
     allowPrivateTargets: config.ALLOW_PRIVATE_TARGETS,
+    hmacSecret: config.WEBHOOK_HMAC_SECRET,
+    hmacHeaderName: config.WEBHOOK_HMAC_HEADER,
     queueName: config.QUEUE_NAME,
     log: (level, msg, ctx) => {
       // fastify.log 는 pino. 컨텍스트는 첫 인자에 객체로.
