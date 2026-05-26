@@ -84,8 +84,8 @@
 3. Fastify 서버의 draining 토글이 다음 라우트에 영향을 준다:
    - `POST /webhooks` → `503 ERR_SHUTTING_DOWN` (인증 검증 이전에 분기)
    - `GET /healthz` → `503` (LB/오케스트레이터 표준 신호 — Q-SEC-5 (a) 정합)
-   - `GET /dashboard`, `POST /_demo/receiver`, `GET /api/queue/stats` → **200 유지**
-     (관측성과 데모 수신자 동작을 셧다운 진행 중에도 보존)
+   - `GET /dashboard`, `POST /_demo/receiver`, `GET /api/queue/stats`, `GET /metrics` → **200 유지**
+     (관측성과 데모 수신자 동작을 셧다운 진행 중에도 보존. `/metrics` 는 Q-OBS-2 (a) — 3단계 PRD `prd-phase3/02` §6 정합. IT-OBS-9 가 회귀 가드.)
 4. 진행 중 작업 완료 대기 (최대 `SHUTDOWN_TIMEOUT_MS`, 기본 30s).
 5. 타임아웃 도달 시 강제 종료 직전에 로그로 **잔여 작업 ID** 기록.
    - **정의:** "잔여 작업 ID" = `worker.getJobs(['active'])`의 결과. 즉 워커가
@@ -142,13 +142,25 @@
 - **R6.4** `/healthz`의 degraded 상태 표현 방식 → `07`.
 - **R6.5** 시크릿 최소 길이/엔트로피 정책 → `07`.
 
-## 12. 3단계 관측성 — Placeholder
+## 12. 3단계 관측성 — 완료 (cross-link)
 
-> 본 PRD는 3단계 항목을 정의하지 않는다. 단지 다음 항목들이 "후속 PRD에서 다뤄야 한다"는
-> 사실만 기록한다. 본 PRD의 코드/요구로 이행해선 안 된다.
+3단계 관측성 항목은 별도 PRD 묶음(`docs/prd-phase3/`) 에서 잠그고 완료됐다. 본 §은
+이행 결과의 cross-link 만 둔다(본 PRD 의 수용 기준에는 포함되지 않는다).
 
-- Prometheus 메트릭 노출 엔드포인트(`/metrics`)와 라벨 설계
-- Grafana 대시보드(JSON으로 버전 관리)
-- SLO/알람 정의
+- **Prometheus 메트릭 노출(`/metrics`)와 라벨 설계** — [`prd-phase3/01-metrics-and-labels.md`](../prd-phase3/01-metrics-and-labels.md), [`prd-phase3/02-metrics-endpoint.md`](../prd-phase3/02-metrics-endpoint.md). C1~C11 + D1~D3 / W1~W4 카탈로그 잠금.
+- **Grafana 대시보드(JSON으로 버전 관리)** — [`prd-phase3/03-grafana-dashboards.md`](../prd-phase3/03-grafana-dashboards.md). 4 대시보드(overview/reliability/dlq/shutdown) + provisioning.
+- **SLO/알람 정의** — [`prd-phase3/04-slo-and-alerts.md`](../prd-phase3/04-slo-and-alerts.md). SLO 4종 + alert 10종(YAML 4 group).
 
-위 항목들은 본 PRD의 어떤 수용 기준에도 포함되지 않는다.
+### 12.1 운영 노트 — 알람 외부 라우팅은 본 PRD/3단계 PRD 범위 밖
+
+3단계 PRD 는 **alerting rule YAML 까지만** 잠근다(`prd-phase3/04` §5.4). 다음 항목은
+모두 별도 운영 PRD 책임:
+
+- Alertmanager 설정(`alertmanager.yml`).
+- 라우팅(PagerDuty / Slack / Email / Microsoft Teams 등 외부 채널).
+- 온콜 로테이션, 인시던트 런북(`runbook_url` 본문).
+- 알람 dedup / silence / inhibit 규칙.
+
+`docker compose up` 후 `http://localhost:9090/api/v1/alerts` 에서 발화 상태를 확인할
+수 있으나, 외부로 전송되지 않는다(본 시스템 의도). 운영 환경에서 알람 채널을 연결할
+때는 별도 운영 PRD 작성 후 Alertmanager 등을 도입한다.
