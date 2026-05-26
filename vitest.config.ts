@@ -20,6 +20,9 @@ export default defineConfig({
             "packages/*/test/**/*.integration.test.ts",
             "packages/*/src/**/*.integration.test.ts",
           ],
+          // BullMQ idle close 시 ioredis blocking client 의 "Connection is closed."
+          // unhandled rejection 만 swallow. 다른 unhandled 는 그대로 throw.
+          setupFiles: ["./vitest.integration-setup.ts"],
         },
       },
     ],

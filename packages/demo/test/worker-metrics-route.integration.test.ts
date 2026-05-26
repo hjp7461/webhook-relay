@@ -21,25 +21,10 @@ let redis: StartedRedis;
 let built: BuiltWorkerServer;
 let metricsBaseUrl: string;
 
-// 워커가 idle 상태(아무 job 도 처리하지 않은 채 blocking 명령 대기 중)에서
-// 셧다운될 때 BullMQ 내부 duplicated ioredis 연결이 "Connection is closed"
-// 를 unhandled 로 emit 한다. 본 테스트는 도메인 핸들러를 호출하지 않으므로
-// idle 상태 그대로 종료된다. 운영에서는 동일 시나리오에서 프로세스가
-// exit 하므로 영향 없음. 본 unhandled 는 테스트 결정성에 영향이 없으니
-// 명시적으로 swallow 한다(원인/조건은 본 주석 참조).
-//
-// 본 listener 는 module 로드 시점에 등록되어 vitest worker 프로세스
-// 전 lifecycle 을 cover 한다(afterAll 이후 cleanup 단계의 rejection 까지
-// 잡기 위함). 다른 unhandled 는 그대로 throw 되어 vitest 가 실패로 표기.
-function isBenignConnectionClosed(err: unknown): boolean {
-  return err instanceof Error && err.message === "Connection is closed.";
-}
-
-process.on("unhandledRejection", (err: unknown): void => {
-  if (!isBenignConnectionClosed(err)) {
-    throw err;
-  }
-});
+// 워커 idle close 시 BullMQ 내부 duplicated ioredis 의 "Connection is
+// closed." unhandled rejection 처리는 `vitest.integration-setup.ts` 가 통합
+// 테스트 전역에서 swallow 한다(본 파일 외 다른 통합 테스트에서도 동일
+// 케이스가 등장). 본 파일에서는 추가 핸들러를 등록하지 않는다.
 
 beforeAll(async () => {
   redis = await startRedisContainer();
