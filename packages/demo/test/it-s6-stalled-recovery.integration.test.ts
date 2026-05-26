@@ -3,7 +3,13 @@ import { randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { startRedisContainer, type StartedRedis } from "./helpers/redis-container.js";
-import { pollUntil, startApp, type AppFixture } from "./helpers/app-fixture.js";
+import {
+  pollUntil,
+  startApp,
+  startSharedWorker,
+  type AppFixture,
+  type SharedWorker,
+} from "./helpers/app-fixture.js";
 
 // IT-S6 — Stalled-job recovery
 //
@@ -154,52 +160,25 @@ describe("IT-S6 stalled recovery", () => {
       { intervalMs: 25, timeoutMs: 5_000 },
     );
 
-    // 워커 A 를 강제 종료. BullMQ Worker.close(force?: boolean) — force=true 면
-    // 진행 중 작업을 기다리지 않고 즉시 닫는다. lock 갱신이 멈춰 stalledInterval
-    // 이후 다른 워커가 회수할 수 있게 된다.
-    await app.server.worker.close(true);
-
-    // 워커 B: 같은 Redis + 같은 큐 + 동일한 BullMQ Worker 옵션으로 별도 인라인 부팅.
-    // 핸들러는 데모와 동일한 webhook-delivery 핸들러를 사용해야 페이로드가 실제로
-    // 전달된다. 본 헬퍼는 단계 4 에서 app-fixture 로 분리한다.
-    const { Worker } = await import("bullmq");
-    const { Redis } = await import("ioredis");
-    const { createWebhookDeliveryHandler } = await import(
-      "../src/handlers/webhook-delivery.js"
-    );
-
-    const bConnection = new Redis(redis.url, {
-      maxRetriesPerRequest: null,
-      enableReadyCheck: false,
-    });
-    const bHandler = createWebhookDeliveryHandler({
-      deliveryTimeoutMs: 5_000,
-      allowPrivateTargets: true,
-      hmacSecret: "h".repeat(32),
-      hmacHeaderName: "X-Webhook-Signature",
-      queueName: app.queueName,
-      log: () => {
-        /* 테스트에서는 무음. */
-      },
-    });
-    const workerB = new Worker(
-      app.queueName,
-      async (job): Promise<void> => {
-        await bHandler({
-          id: job.id ?? "",
-          data: job.data as unknown,
-          attemptsMade: job.attemptsMade,
-        });
-      },
-      {
-        connection: bConnection,
-        concurrency: 1,
-        stalledInterval: STALLED_INTERVAL_MS,
-        maxStalledCount: MAX_STALLED_COUNT,
-      },
-    );
-
+    // 워커 B: 같은 Redis + 같은 큐 + 동일한 stalled 옵션으로 별도 부팅.
+    // PLAN `07` §4 단계 4 — app-fixture 가 노출하는 startSharedWorker 헬퍼 사용.
+    // 워커 B 를 워커 A 강제 종료 전에 띄워 둔다 — A 가 lock 갱신을 멈춘 직후
+    // 부터 B 가 stalled scanner 로 회수 가능하도록.
+    let workerB: SharedWorker | undefined;
     try {
+      workerB = await startSharedWorker({
+        redisUrl: redis.url,
+        queueName: app.queueName,
+        label: "worker-B",
+        stalledIntervalMs: STALLED_INTERVAL_MS,
+        maxStalledCount: MAX_STALLED_COUNT,
+        concurrency: 1,
+      });
+
+      // 워커 A 를 강제 종료. BullMQ Worker.close(true) — 진행 중 작업을 기다리지
+      // 않고 즉시 닫는다. lock 갱신이 멈춰 stalledInterval 이후 워커 B 가 회수.
+      await app.server.worker.close(true);
+
       // 폴링: BullMQ 작업 상태 == completed.
       await pollUntil(
         async () => {
@@ -219,16 +198,7 @@ describe("IT-S6 stalled recovery", () => {
       );
       expect(matched.length).toBeGreaterThanOrEqual(1);
     } finally {
-      try {
-        await workerB.close();
-      } catch {
-        // best-effort
-      }
-      try {
-        await bConnection.quit();
-      } catch {
-        // best-effort
-      }
+      if (workerB) await workerB.close();
     }
   }, 30_000);
 });

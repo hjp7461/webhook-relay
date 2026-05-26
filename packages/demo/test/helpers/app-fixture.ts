@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { Queue } from "bullmq";
+import { Queue, Worker, type Job } from "bullmq";
 import { Redis } from "ioredis";
 import { buildServer, type BuiltServer } from "../../src/server.js";
 import type { AppConfig } from "../../src/config.js";
+import { createWebhookDeliveryHandler } from "../../src/handlers/webhook-delivery.js";
+import type { WebhookJobData } from "../../src/domain/schemas.js";
 
 // in-process Fastify + Worker 부팅 헬퍼.
 //
@@ -156,6 +158,114 @@ export async function startApp(opts: FixtureOptions): Promise<AppFixture> {
     async stop(): Promise<void> {
       await dlqQueue.close();
       await server.close();
+    },
+  };
+}
+
+// SharedWorker — 같은 Redis + 같은 큐를 공유하는 별도의 BullMQ Worker.
+//
+// M6 의 IT-S6 는 워커 A 가 in-process 부팅된 server.ts 의 Worker 이고,
+// 워커 B 는 본 헬퍼로 별도 인스턴스를 띄운다. 두 워커는 같은 큐의 lock
+// 을 두고 경쟁하며, A 가 lock 갱신을 멈추면(`worker.close(true)`) B 가
+// stalledInterval 이후 회수한다.
+//
+// 본 헬퍼는 도메인(webhook) 식별자를 받지 않으며, IT-S6 가 데모 핸들러를
+// 사용해야 페이로드가 실제로 전달되므로 demo 의 createWebhookDeliveryHandler
+// 를 그대로 사용한다(demo 패키지 내부 헬퍼이므로 경계 위반 아님).
+
+export interface SharedWorker {
+  readonly label: string;
+  readonly worker: Worker<WebhookJobData, void, string>;
+  /** force=true 면 진행 중 작업을 기다리지 않고 즉시 닫는다(BullMQ Worker.close). */
+  close(force?: boolean): Promise<void>;
+}
+
+export interface StartSharedWorkerOptions {
+  readonly redisUrl: string;
+  readonly queueName: string;
+  /** 라벨(워커 식별용). BullMQ Worker name 옵션에도 부여한다. */
+  readonly label: string;
+  /** BullMQ stalled 체크 주기(ms). IT-S6 는 운영 기본을 단축. */
+  readonly stalledIntervalMs?: number;
+  /** stalled 마킹 최대 횟수. */
+  readonly maxStalledCount?: number;
+  /** 동시 처리 수(기본 1). */
+  readonly concurrency?: number;
+  /** HMAC 시크릿(기본은 fixture 기본과 동일한 32-byte placeholder). */
+  readonly hmacSecret?: string;
+  /** 송신 타임아웃(ms). */
+  readonly deliveryTimeoutMs?: number;
+  /** 사설 대상 허용 여부(데모는 localhost 송신이 일반적이므로 기본 true). */
+  readonly allowPrivateTargets?: boolean;
+}
+
+/**
+ * 별도의 BullMQ Worker 를 띄운다(IT-S6 의 워커 B). 같은 Redis + 같은 큐를
+ * 공유하므로 lock 경쟁이 일어나며, stalledInterval 이 만료된 stalled 작업을
+ * 회수해 처리한다. 본 함수는 도메인 식별자(웹훅)를 받지 않으며, 데모 패키지
+ * 내부에서만 호출된다.
+ */
+export async function startSharedWorker(
+  opts: StartSharedWorkerOptions,
+): Promise<SharedWorker> {
+  const connection = new Redis(opts.redisUrl, {
+    maxRetriesPerRequest: null,
+    enableReadyCheck: false,
+  });
+  const handler = createWebhookDeliveryHandler({
+    deliveryTimeoutMs: opts.deliveryTimeoutMs ?? 5_000,
+    allowPrivateTargets: opts.allowPrivateTargets ?? true,
+    hmacSecret: opts.hmacSecret ?? "h".repeat(32),
+    hmacHeaderName: "X-Webhook-Signature",
+    queueName: opts.queueName,
+    log: () => {
+      /* 테스트에서는 무음. */
+    },
+  });
+  const worker = new Worker<WebhookJobData, void, string>(
+    opts.queueName,
+    async (job: Job<WebhookJobData, void, string>): Promise<void> => {
+      await handler({
+        id: job.id ?? "",
+        data: job.data,
+        attemptsMade: job.attemptsMade,
+      });
+    },
+    {
+      connection,
+      concurrency: opts.concurrency ?? 1,
+      // BullMQ 의 Worker name 옵션. stalled 회수 시 워커별 lock 을 구분하는데
+      // 도움이 되도록 라벨을 부여한다(BullMQ 4.x — Worker name 은 메타 식별자).
+      name: opts.label,
+      ...(opts.stalledIntervalMs !== undefined
+        ? { stalledInterval: opts.stalledIntervalMs }
+        : {}),
+      ...(opts.maxStalledCount !== undefined
+        ? { maxStalledCount: opts.maxStalledCount }
+        : {}),
+    },
+  );
+
+  let closed = false;
+  return {
+    label: opts.label,
+    worker,
+    async close(force?: boolean): Promise<void> {
+      if (closed) return;
+      closed = true;
+      try {
+        // BullMQ Worker.close(force?: boolean) — force=true 는 진행 중 작업을
+        // 기다리지 않고 즉시 닫는다. lock 갱신이 멈추면 stalledInterval 후
+        // 다른 워커가 회수할 수 있다.
+        await worker.close(force ?? false);
+      } catch {
+        // best-effort
+      }
+      try {
+        await connection.quit();
+      } catch {
+        // best-effort
+      }
     },
   };
 }
