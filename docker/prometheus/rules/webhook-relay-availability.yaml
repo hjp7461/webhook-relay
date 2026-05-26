@@ -1,0 +1,58 @@
+# Prometheus alerting rules — SLO-1 가용성(POST /webhooks 5xx 비율 ≤ 0.5%).
+#
+# PRD `docs/prd-phase3/04-slo-and-alerts.md` §5.2.1 의 YAML 을 글자 단위로 옮긴다.
+# 임계값은 SLO 목표(0.5%) × burn rate(14.4× / 6×) 로 산출(Google SRE Workbook
+# multi-window multi-burn-rate 표준). 본 PRD 가 잠정값을 잠근다(Q-OBS-11 (a) /
+# Q-OBS-12 (a)). 운영 측정 후 4단계에서 재조정 가능.
+#
+# 라우팅(Alertmanager/PagerDuty/Slack/온콜)은 본 PRD 범위 밖(`04` §5.4).
+# severity / slo 라벨까지만 정의한다.
+groups:
+  - name: webhook-relay-availability
+    interval: 30s
+    rules:
+      # SLO-1: POST /webhooks 5xx 비율 ≤ 0.5%
+      # Page alert: 5m + 1h, burn rate 14.4×
+      - alert: WebhookRelayAvailabilityBurnRateFast
+        expr: |
+          (
+            sum(rate(webhook_relay_api_requests_total{route="/webhooks",status_class="5xx"}[5m]))
+            /
+            sum(rate(webhook_relay_api_requests_total{route="/webhooks"}[5m]))
+          ) > (14.4 * 0.005)
+          and
+          (
+            sum(rate(webhook_relay_api_requests_total{route="/webhooks",status_class="5xx"}[1h]))
+            /
+            sum(rate(webhook_relay_api_requests_total{route="/webhooks"}[1h]))
+          ) > (14.4 * 0.005)
+        for: 2m
+        labels:
+          severity: page
+          slo: SLO-1-availability
+        annotations:
+          summary: "POST /webhooks 5xx rate burning 28d error budget too fast"
+          description: |
+            POST /webhooks 5xx 비율이 burn rate 14.4× 를 5m+1h 윈도우에서 초과 중.
+            28일 error budget 의 2%가 1시간 안에 소진되는 속도.
+          runbook_url: ""  # 본 PRD 범위 밖 — 운영 PRD에서 작성
+      # Ticket alert: 30m + 6h, burn rate 6×
+      - alert: WebhookRelayAvailabilityBurnRateSlow
+        expr: |
+          (
+            sum(rate(webhook_relay_api_requests_total{route="/webhooks",status_class="5xx"}[30m]))
+            /
+            sum(rate(webhook_relay_api_requests_total{route="/webhooks"}[30m]))
+          ) > (6 * 0.005)
+          and
+          (
+            sum(rate(webhook_relay_api_requests_total{route="/webhooks",status_class="5xx"}[6h]))
+            /
+            sum(rate(webhook_relay_api_requests_total{route="/webhooks"}[6h]))
+          ) > (6 * 0.005)
+        for: 15m
+        labels:
+          severity: ticket
+          slo: SLO-1-availability
+        annotations:
+          summary: "POST /webhooks 5xx rate sustained burn"
