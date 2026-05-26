@@ -4,6 +4,10 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@webhook-relay/core": "workspace:*"
+    "@webhook-relay/core": "workspace:*",
+    "bullmq": "^5.77.3",
+    "fastify": "^5.8.5",
+    "ioredis": "^5.10.1",
+    "zod": "^4.4.3"
   }
 }

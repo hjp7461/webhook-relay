@@ -5,3 +5,5 @@ packages:
 # pnpm 의 보수적 정책상 명시적으로 true 로 켠다.
 allowBuilds:
   esbuild: true
+  # bullmq → msgpackr → msgpackr-extract 의 네이티브 빌드 허용. 실패해도 JS fallback 동작.
+  msgpackr-extract: true

@@ -2,5 +2,9 @@
   "name": "@webhook-relay/core",
   "version": "0.0.0",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "bullmq": "^5.77.3",
+    "ioredis": "^5.10.1"
+  }
 }
