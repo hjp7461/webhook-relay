@@ -45,7 +45,7 @@
 │   │   │   ├── producer.ts      # 작업 등록 + 멱등성 키 인터페이스
 │   │   │   ├── worker.ts        # 워커 + 핸들러 실행 (핸들러는 외부 주입)
 │   │   │   ├── retry.ts         # 백오프 정책 + DLQ 이동
-│   │   │   ├── metrics.ts       # prom-client 정의 (정의만, 노출은 3단계)
+│   │   │   ├── metrics.ts       # prom-client 도메인 무관 메트릭(C1~C11) + Registry (3단계에서 `GET /metrics` 로 노출)
 │   │   │   ├── shutdown.ts      # 그레이스풀 셧다운
 │   │   │   └── errors.ts        # RetriableError / NonRetriableError
 │   │   └── test/
@@ -68,7 +68,10 @@
 ```
 
 > `core/metrics.ts`는 본 PRD 범위에서 **정의만** 두고 외부에 노출하지 않는다. 실제 Prometheus
-> 노출과 Grafana 연동은 3단계.
+> 노출과 Grafana 연동은 3단계(`docs/prd-phase3/`) 에서 `prom-client` 도입과 함께 완료됐다 —
+> `core/metrics.ts` 가 도메인 무관 C1~C11 을 잠그고, `demo/src/metrics.ts` 가 도메인 D1~D3/W1~W4
+> 를 잠근다. 4 대시보드(`docker/grafana/`) + alerting rule 4종(`docker/prometheus/rules/`) 도 같은
+> 단계에 정착.
 
 ## 5. 의존 방향과 금지 사항
 
@@ -183,7 +186,7 @@
 | HMAC 서명 | `demo/domain/*` | 시크릿은 환경변수 → `demo/config` |
 | 셧다운 시퀀스 | `core/shutdown.ts` | 시그널 핸들러 등록은 `demo`의 부트스트랩에서 호출 |
 | 환경변수 정의/파싱 | `demo/config.ts` | `core`는 환경변수를 직접 읽지 않는다 |
-| 메트릭 정의(정의만) | `core/metrics.ts` | 실제 노출은 3단계 |
+| 메트릭 정의 + Registry 노출 | `core/metrics.ts` (도메인 무관 C1~C11), `demo/src/metrics.ts` (도메인 D1~D3/W1~W4) | 3단계 PRD 가 prom-client 를 도입하고 Registry 를 `GET /metrics` 로 노출 |
 
 ## 7-A. 구현 규약 (CLAUDE.md §4의 PRD 요구사항화)
 
