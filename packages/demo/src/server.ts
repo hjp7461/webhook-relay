@@ -33,8 +33,14 @@ import {
 // demo/server.ts
 //
 // 부트스트랩: 환경변수 파싱 → 연결 → 큐/워커 → Fastify 라우트 등록.
-// API 와 워커가 같은 프로세스에서 동작(PRD `01` MVP 범위).
-// SIGINT/SIGTERM 수신 시 close 호출은 최소한만 — 전체 시퀀스는 M7 의 책임.
+//
+// 서비스 모드(SERVICE_MODE env, config.ts 참조):
+// - 'all'    — 단일 프로세스에 API + Worker 동거(MVP 기본값, IT-S7 자식 호환).
+// - 'api'    — Fastify 만(워커 미생성). 운영 환경의 컨테이너 분리용.
+// - 'worker' — BullMQ Worker 만(HTTP 미생성). docker compose --scale worker=N.
+//
+// 통합 테스트(75건)는 buildServer() 를 직접 호출하므로 SERVICE_MODE 영향이 없다.
+// main() 만 SERVICE_MODE 를 읽어 적절한 builder 를 디스패치한다.
 //
 // M5: 별도 DLQ Queue 를 함께 생성하고 워커에 주입. 원 큐의 작업은
 // removeOnFail: { count: 0 } 으로 즉시 제거 — DLQ 단방향(I2.4) 보강.
@@ -53,6 +59,33 @@ export interface BuiltServer {
    */
   setDraining(value: boolean): void;
   isDraining(): boolean;
+  close(): Promise<void>;
+}
+
+/**
+ * API 전용(Fastify HTTP 만) 빌드 결과. 워커가 없으므로 worker 필드 미노출.
+ * dlqQueue 는 대시보드(`/api/queue/stats`)의 DLQ 카운트 표시용으로 read-only.
+ */
+export interface BuiltApiServer {
+  readonly fastify: FastifyInstance;
+  readonly queue: QueueFacade;
+  readonly dlqQueue: Queue<DlqJobData<WebhookJobData>, void, string>;
+  readonly receiverStore: ReceiverStore;
+  readonly connection: Redis;
+  setDraining(value: boolean): void;
+  isDraining(): boolean;
+  close(): Promise<void>;
+}
+
+/**
+ * Worker 전용(BullMQ Worker 만) 빌드 결과. HTTP 가 없으므로 fastify/draining 미노출.
+ * queue 는 워커가 동일 BullMQ 큐를 공유하기 위해 보유한다(client 측 옵션 적용 목적).
+ */
+export interface BuiltWorkerServer {
+  readonly worker: Worker<WebhookJobData, void, string>;
+  readonly queue: Queue<WebhookJobData, void, string>;
+  readonly dlqQueue: Queue<DlqJobData<WebhookJobData>, void, string>;
+  readonly connection: Redis;
   close(): Promise<void>;
 }
 
@@ -86,15 +119,20 @@ function assertQueueNameConsistency(config: AppConfig): void {
   }
 }
 
-export async function buildServer(config: AppConfig): Promise<BuiltServer> {
-  assertQueueNameConsistency(config);
-
-  const connection = createConnection({
+// 공통 helper — Redis 연결 생성.
+function createConnectionFromConfig(config: AppConfig): Redis {
+  return createConnection({
     url: config.REDIS_URL,
     reconnectBaseMs: config.REDIS_RECONNECT_BASE_MS,
     reconnectMaxMs: config.REDIS_RECONNECT_MAX_MS,
   });
+}
 
+// 공통 helper — 메인 큐 생성(재시도/보관 정책 포함).
+function createMainQueue(
+  config: AppConfig,
+  connection: Redis,
+): Queue<WebhookJobData, void, string> {
   // M4: 모든 add 작업에 동일 재시도 정책을 자동 적용한다.
   // BullMQ 표준 옵션(attempts + backoff: exponential)을 사용(F2.3).
   // 자체 백오프 구현 금지(AC-M4).
@@ -106,7 +144,7 @@ export async function buildServer(config: AppConfig): Promise<BuiltServer> {
     maxAttempts: config.WEBHOOK_MAX_ATTEMPTS,
     backoffBaseMs: config.WEBHOOK_BACKOFF_BASE_MS,
   });
-  const queue = createQueue<WebhookJobData, void, string>(config.QUEUE_NAME, {
+  return createQueue<WebhookJobData, void, string>(config.QUEUE_NAME, {
     connection,
     queueOptions: {
       defaultJobOptions: {
@@ -120,11 +158,34 @@ export async function buildServer(config: AppConfig): Promise<BuiltServer> {
       },
     },
   });
+}
 
-  // M5: 별도의 DLQ 큐. 워커가 종단 실패 시 새 항목을 적재한다.
-  const dlqQueue = createDlqQueue<WebhookJobData>(config.DLQ_NAME, {
-    connection,
-  });
+// 공통 helper — DLQ 큐 생성.
+function createDlq(
+  config: AppConfig,
+  connection: Redis,
+): Queue<DlqJobData<WebhookJobData>, void, string> {
+  return createDlqQueue<WebhookJobData>(config.DLQ_NAME, { connection });
+}
+
+// 공통 helper — QueueFacade 구성.
+function makeFacade(queue: Queue<WebhookJobData, void, string>): QueueFacade {
+  return {
+    raw: queue,
+    async getJobState(jobId: string): Promise<string | undefined> {
+      const job = await queue.getJob(jobId);
+      if (!job) return undefined;
+      return job.getState();
+    },
+  };
+}
+
+export async function buildServer(config: AppConfig): Promise<BuiltServer> {
+  assertQueueNameConsistency(config);
+
+  const connection = createConnectionFromConfig(config);
+  const queue = createMainQueue(config, connection);
+  const dlqQueue = createDlq(config, connection);
 
   const receiverStore = new ReceiverStore();
 
@@ -183,14 +244,7 @@ export async function buildServer(config: AppConfig): Promise<BuiltServer> {
     dlqQueue,
   });
 
-  const facade: QueueFacade = {
-    raw: queue,
-    async getJobState(jobId: string): Promise<string | undefined> {
-      const job = await queue.getJob(jobId);
-      if (!job) return undefined;
-      return job.getState();
-    },
-  };
+  const facade = makeFacade(queue);
 
   let closing = false;
   async function close(): Promise<void> {
@@ -233,6 +287,152 @@ export async function buildServer(config: AppConfig): Promise<BuiltServer> {
     connection,
     setDraining,
     isDraining,
+    close,
+  };
+}
+
+/**
+ * API 전용 빌더. Fastify HTTP + 큐/DLQ 핸들(읽기 전용 통계용) + receiverStore.
+ * 워커는 생성하지 않는다 — 별도 worker 컨테이너가 큐를 소비한다.
+ */
+export async function buildApiServer(config: AppConfig): Promise<BuiltApiServer> {
+  assertQueueNameConsistency(config);
+
+  const connection = createConnectionFromConfig(config);
+  const queue = createMainQueue(config, connection);
+  const dlqQueue = createDlq(config, connection);
+
+  const receiverStore = new ReceiverStore();
+
+  let draining = false;
+  const setDraining = (value: boolean): void => {
+    draining = value;
+  };
+  const isDraining = (): boolean => draining;
+
+  const fastify = Fastify({
+    logger: { level: config.LOG_LEVEL },
+    bodyLimit: config.WEBHOOK_MAX_PAYLOAD_BYTES,
+  });
+
+  await registerWebhooksRoute(fastify, {
+    queue,
+    bearerToken: config.API_BEARER_TOKEN,
+    isDraining,
+  });
+  await registerReceiverRoute(fastify, { store: receiverStore });
+  await registerDashboardRoutes(fastify, { queue, dlqQueue });
+  await registerHealthzRoute(fastify, { connection, isDraining });
+
+  const facade = makeFacade(queue);
+
+  let closing = false;
+  async function close(): Promise<void> {
+    if (closing) return;
+    closing = true;
+    try {
+      await fastify.close();
+    } catch {
+      // best-effort
+    }
+    try {
+      await queue.close();
+    } catch {
+      // best-effort
+    }
+    try {
+      await dlqQueue.close();
+    } catch {
+      // best-effort
+    }
+    try {
+      await connection.quit();
+    } catch {
+      // best-effort
+    }
+  }
+
+  return {
+    fastify,
+    queue: facade,
+    dlqQueue,
+    receiverStore,
+    connection,
+    setDraining,
+    isDraining,
+    close,
+  };
+}
+
+/**
+ * Worker 전용 빌더. BullMQ Worker + 큐/DLQ + 핸들러. HTTP 라우트 미생성.
+ * `docker compose up --scale worker=N` 으로 수평 확장된다.
+ *
+ * 로그는 stdout(JSON 라인)으로 직접 출력한다 — Fastify pino 인스턴스가 없으므로
+ * 핸들러 log 콜백은 process.stdout 에 JSON 으로 직접 write 한다.
+ */
+export async function buildWorkerServer(config: AppConfig): Promise<BuiltWorkerServer> {
+  assertQueueNameConsistency(config);
+
+  const connection = createConnectionFromConfig(config);
+  const queue = createMainQueue(config, connection);
+  const dlqQueue = createDlq(config, connection);
+
+  const handler: CoreJobHandler<unknown> = createWebhookDeliveryHandler({
+    deliveryTimeoutMs: config.WEBHOOK_DELIVERY_TIMEOUT_MS,
+    allowPrivateTargets: config.ALLOW_PRIVATE_TARGETS,
+    hmacSecret: config.WEBHOOK_HMAC_SECRET,
+    hmacHeaderName: config.WEBHOOK_HMAC_HEADER,
+    queueName: config.QUEUE_NAME,
+    log: (level, msg, ctx) => {
+      // 구조화 로그(JSON 한 줄). 시크릿은 ctx 에 포함되지 않도록 핸들러 측이
+      // 책임진다(CLAUDE.md §4 "민감 정보 미기록").
+      const line = JSON.stringify({ level, msg, ...ctx });
+      process.stdout.write(`${line}\n`);
+    },
+  });
+
+  const worker = createWorker<WebhookJobData>(config.QUEUE_NAME, handler, {
+    connection,
+    workerOptions: {
+      concurrency: config.WORKER_CONCURRENCY,
+    },
+    stalledInterval: config.STALLED_INTERVAL_MS,
+    maxStalledCount: config.MAX_STALLED_COUNT,
+    dlqQueue,
+  });
+
+  let closing = false;
+  async function close(): Promise<void> {
+    if (closing) return;
+    closing = true;
+    try {
+      await worker.close();
+    } catch {
+      // best-effort
+    }
+    try {
+      await queue.close();
+    } catch {
+      // best-effort
+    }
+    try {
+      await dlqQueue.close();
+    } catch {
+      // best-effort
+    }
+    try {
+      await connection.quit();
+    } catch {
+      // best-effort
+    }
+  }
+
+  return {
+    worker,
+    queue,
+    dlqQueue,
+    connection,
     close,
   };
 }
