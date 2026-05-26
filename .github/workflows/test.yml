@@ -1,0 +1,73 @@
+name: test
+
+# PR 마다 / main 푸시마다 회귀를 자동으로 잡는다.
+# 단위와 통합을 분리해서, 단위가 깨지면 빠르게(Redis 컨테이너 기동 없이) 피드백.
+# 통합은 Testcontainers 가 Docker 데몬으로 Redis 를 띄운다 — GitHub-hosted
+# runner 는 Docker 가 기본 활성화되어 있다.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# 같은 브랜치/PR 의 진행 중 잡은 새 푸시가 오면 취소(시간/돈 절약).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    name: unit tests + typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          # 루트 package.json 의 packageManager 필드를 따른다.
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: install
+        run: pnpm install --frozen-lockfile
+
+      - name: typecheck
+        run: pnpm typecheck
+
+      - name: unit tests
+        run: pnpm test:unit
+
+  integration:
+    name: integration tests (Testcontainers + Redis)
+    runs-on: ubuntu-latest
+    # 통합은 컨테이너 기동 + wall-clock 의존 시나리오(IT-S3/S6/S7)가 있어
+    # 단위보다 길게 잡는다.
+    timeout-minutes: 20
+    # Q-OPS-1 (b): 통합 테스트를 별도 잡으로 분리해 단위 빠른 피드백을 보존한다.
+    # unit 잡과 병렬 실행 — needs 를 두지 않음.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: install
+        run: pnpm install --frozen-lockfile
+
+      - name: typecheck
+        run: pnpm typecheck
+
+      - name: integration tests
+        run: pnpm test:integration
