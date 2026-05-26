@@ -1,5 +1,6 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import {
+  buildWorkerRetryOptions,
   createConnection,
   createQueue,
   createWorker,
@@ -46,8 +47,21 @@ export async function buildServer(config: AppConfig): Promise<BuiltServer> {
     reconnectMaxMs: config.REDIS_RECONNECT_MAX_MS,
   });
 
+  // M4: 모든 add 작업에 동일 재시도 정책을 자동 적용한다.
+  // BullMQ 표준 옵션(attempts + backoff: exponential)을 사용(F2.3).
+  // 자체 백오프 구현 금지(AC-M4).
+  const retryDefaults = buildWorkerRetryOptions({
+    maxAttempts: config.WEBHOOK_MAX_ATTEMPTS,
+    backoffBaseMs: config.WEBHOOK_BACKOFF_BASE_MS,
+  });
   const queue = createQueue<WebhookJobData, void, string>(config.QUEUE_NAME, {
     connection,
+    queueOptions: {
+      defaultJobOptions: {
+        attempts: retryDefaults.attempts,
+        backoff: { ...retryDefaults.backoff },
+      },
+    },
   });
 
   const receiverStore = new ReceiverStore();
