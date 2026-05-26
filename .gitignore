@@ -45,3 +45,6 @@ Thumbs.db
 # Misc
 tmp/
 temp/
+
+# mise
+mise.toml
