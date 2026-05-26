@@ -29,3 +29,10 @@ export type {
   DlqJobData,
   DlqLastError,
 } from "./dlq.js";
+
+export { gracefulShutdown } from "./shutdown.js";
+export type {
+  GracefulShutdownInput,
+  GracefulShutdownResult,
+  ShutdownHttpServer,
+} from "./shutdown.js";

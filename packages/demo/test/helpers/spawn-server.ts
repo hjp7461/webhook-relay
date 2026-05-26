@@ -1,4 +1,5 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, type ChildProcessByStdio } from "node:child_process";
+import type { Readable } from "node:stream";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -21,7 +22,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const SERVER_ENTRY = resolve(HERE, "..", "..", "src", "server.ts");
 
 export interface SpawnedServer {
-  readonly child: ChildProcessWithoutNullStreams;
+  readonly child: ChildProcessByStdio<null, Readable, Readable>;
   readonly baseUrl: string;
   readonly stdout: string[];
   readonly stderr: string[];
