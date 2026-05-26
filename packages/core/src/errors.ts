@@ -9,7 +9,7 @@
 // M4 메타 컨텍스트 옵션:
 // - httpStatus / cause 를 클래스 인스턴스에 보존해 워커/로깅 측이
 //   추가 컨텍스트(구조화 로그의 errorClass/httpStatus — PRD `05` §9 2단계)
-//   를 노출할 수 있게 한다. 도메인 식별자(webhook 등)는 받지 않는다.
+//   를 노출할 수 있게 한다. 도메인 식별자는 받지 않는다.
 
 export interface ClassifiedErrorContext {
   /** 외부 응답 HTTP 상태(있을 때). */
