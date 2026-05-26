@@ -180,7 +180,8 @@ pnpm test:integration # 통합 (Testcontainers로 실제 Redis 기동)
 장애 복구·동시성 시나리오는 모킹이 아니라 **실제 Redis 컨테이너**로 검증합니다.
 검증 시나리오 목록은 `CLAUDE.md` §5 참조.
 
-현재 상태: **74 tests passed** (UT-1~6 + IT-R1 + IT-S1~S7). 7개 핵심 시나리오 전건 그린.
+현재 상태: **117 tests passed** (UT-1~7 + Redis backoff + IT-R1 + IT-S1~S7 + IT-S1b/S2b/S6b
++ M-OBS-1 메트릭 라우트 통합 테스트 등). 7개 핵심 시나리오 + 회귀 가드 전건 그린.
 
 ---
 
@@ -212,8 +213,18 @@ pnpm test:integration # 통합 (Testcontainers로 실제 Redis 기동)
 - [x] 1단계 — MVP: 작업 등록 → 워커 처리 → 대시보드 표시 _(IT-S1)_
 - [x] 2단계 — 장애 복구: 멱등성, 백오프 재시도, DLQ, stalled-job 회수, 그레이스풀 셧다운
       _(IT-S2 ~ IT-S7)_
-- [ ] 3단계 — 관측성: Prometheus 메트릭 + Grafana 대시보드
-- [ ] 4단계 — 부하 테스트 + 수평 확장 측정 + API/Worker 프로세스 분리
+- [x] API/Worker 프로세스 분리 — `SERVICE_MODE` env(`all`/`api`/`worker`) +
+      `docker compose up --scale worker=N`
+- [ ] 3단계 — 관측성: Prometheus 메트릭 + Grafana 대시보드 _(진행 중 — M-OBS-1~6)_
+  - [x] **M-OBS-1 Bootstrap** — prom-client 도입, `core/metrics.ts` 진화(Q-ARCH-3 약속 이행),
+        IT-R1 grep 룰 `webhook_relay_` 예외, `GET /metrics` 라우트 (api 모드 `3000` / worker
+        모드 `WORKER_METRICS_PORT=3001`)
+  - [ ] M-OBS-2 Core Metrics Wiring — 도메인 무관 메트릭(C1~C11) instrumented
+  - [ ] M-OBS-3 Demo Metrics Wiring — 도메인 메트릭(D1~D3 / W1~W4) instrumented
+  - [ ] M-OBS-4 Grafana Provisioning — 대시보드 4종 + Prometheus/Grafana 컨테이너
+  - [ ] M-OBS-5 SLO + Alerting Rules — rule YAML 4종(가용성/p99 지연/에러율/DLQ 누적)
+  - [ ] M-OBS-6 Refinement (선택) — 카디널리티 모니터링 + 로그·메트릭 라벨 정합
+- [ ] 4단계 — 부하 테스트 + p50/p99 측정 + 수평 확장 SLO 검증
 - [ ] (부록) Raw Redis Streams로 큐 내부 직접 구현 + 추상화 비용 벤치마크
 
 ---
