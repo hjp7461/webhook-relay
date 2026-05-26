@@ -45,6 +45,17 @@ export interface FixtureOptions {
   readonly maxAttempts?: number;
   /** 백오프 base ms. M4 의 IT-S3 는 짧은 base 로 wall-clock 안정화. */
   readonly backoffBaseMs?: number;
+  /**
+   * BullMQ stalled 체크 주기(ms). M6 의 IT-S6 는 운영 기본(30s)을 테스트용
+   * 으로 단축(예: 500ms). 본 옵션은 AppConfig 의 STALLED_INTERVAL_MS 로
+   * 전달되며, server.ts 가 core.createWorker 의 BullMQ Worker 옵션에 주입한다.
+   */
+  readonly stalledIntervalMs?: number;
+  /**
+   * stalled 로 마킹되는 최대 횟수. M6 의 IT-S6 는 1 회만 stall 되는 시나리오
+   * 이므로 기본 1.
+   */
+  readonly maxStalledCount?: number;
 }
 
 export async function startApp(opts: FixtureOptions): Promise<AppFixture> {
@@ -64,8 +75,8 @@ export async function startApp(opts: FixtureOptions): Promise<AppFixture> {
     WEBHOOK_HMAC_HEADER: "X-Webhook-Signature",
     QUEUE_NAME: queueName,
     DLQ_NAME: dlqName,
-    STALLED_INTERVAL_MS: 30000,
-    MAX_STALLED_COUNT: 1,
+    STALLED_INTERVAL_MS: opts.stalledIntervalMs ?? 30000,
+    MAX_STALLED_COUNT: opts.maxStalledCount ?? 1,
     SHUTDOWN_TIMEOUT_MS: 30000,
     REDIS_RECONNECT_BASE_MS: 200,
     REDIS_RECONNECT_MAX_MS: 10000,
