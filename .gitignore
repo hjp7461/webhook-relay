@@ -48,3 +48,12 @@ temp/
 
 # mise
 mise.toml
+
+# 4단계 부하 측정의 raw artifact (M-LOAD-2 단계 6 사용자 결정 잠금, 2026-05-27).
+# 단일 출처 = docs/prd-phase4/results/*.md Markdown 보고서 (PRD `02` §6.4 + I4.10).
+# raw artifact 는 docker/k6/scripts/run-lp-N.sh 재실행으로 재생성 가능.
+# .gitkeep 은 보존하여 빈 디렉터리 자리 잠금 유지.
+docker/k6/results/LP-*/
+docker/k6/results/horizontal-scaling-*/
+docker/k6/results/final-*/
+docker/k6/results/micro-n-matrix-*/
