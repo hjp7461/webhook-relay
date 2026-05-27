@@ -4,8 +4,8 @@
 > `../../../docs/plan-phase4/03-m-load-2-lp1-baseline.md` §4 단계 3).
 > M-LOAD-3 단계 6 가 §2 LP-2 절을 추가 (PLAN
 > `../../../docs/plan-phase4/04-m-load-3-lp2-nominal.md` §4 단계 6).
-> 후속 마일스톤(M-LOAD-4) 의 LP-3/LP-4 시나리오는 본 README 의 §1/§2 형식
-> (시나리오 계약) 을 mirror 한다.
+> M-LOAD-4 별도 docs commit 이 §3 LP-3 + §4 LP-4 절을 추가 (PLAN
+> `../../../docs/plan-phase4/05-m-load-4-lp3-lp4.md` §5).
 
 ---
 
@@ -70,10 +70,9 @@
   param 으로 부착 (`packages/demo/src/api/receiver.ts` 단계 2 commit
   df2ae52 — variant-aware stub 응답 모드).
 - variant 미지정 또는 `normal` → 1~2단계 동작 보존 (200 + `{ ok: true }`).
-- s3 변형의 카운터 키: 워커 송신 헤더의 HMAC 서명값 (`sha256=<hex>`).
-  같은 jobData → 결정성 본문 → 결정성 HMAC → 재시도 시 같은 카운터 슬롯.
-  HMAC 헤더 이름이 무엇이든(env `WEBHOOK_HMAC_HEADER`) 식별 가능하도록
-  prefix 매칭으로 추출 — env / config 외부 의존 0.
+- s3 변형의 카운터 키: M-LOAD-3 fix commit `ec1da6d` 가 `body.idempotencyKey`
+  를 1차 키로 추출, HMAC 헤더값을 fallback 으로 보존. 결정성 패딩 환경에서
+  multiple unique 작업의 동일 HMAC 충돌 회피.
 - s3 카운터 Map 은 라우트 등록 closure 안 — 측정 종료 후 컨테이너 재시작
   으로 초기화. 별도 영속화 0건.
 
@@ -88,7 +87,7 @@
 | `K6_SEED` | `0` | 페이로드 크기 PRNG (mulberry32) 시드 — §2.5 |
 
 LP-1 과 공유 (`K6_TARGET_URL`, `K6_API_BEARER_TOKEN`, `K6_RECEIVER_URL`)
-는 §3 표 참조.
+는 §5 표 참조.
 
 ### 2.5 페이로드 분포의 결정성
 
@@ -113,21 +112,148 @@ PRD `prd-phase4/01` §4.3 + I4.5 + PLAN `08-cross-cutting.md` §4 정합.
 - `size_bytes`: 선택된 페이로드 크기 (k6 메트릭의 분포 검증 tag).
 
 본 tag 는 k6 메트릭에만 부착되며 본 시스템의 `webhook_relay_*` 메트릭에는
-영향이 없다 (IT-OBS-11 카디널리티 가드 자연 제외 — §4.1 정합).
+영향이 없다 (IT-OBS-11 카디널리티 가드 자연 제외 — §6.1 정합).
 
 ---
 
-## 3. 환경변수 입력 (LP-1 + 공유)
+## 3. LP-3 시나리오 계약 (`lp-3.js`)
+
+> M-LOAD-4 별도 docs commit 이 본 절을 추가 (PLAN
+> `../../../docs/plan-phase4/05-m-load-4-lp3-lp4.md` §4 단계 1 + §5).
+> 본 절은 §2 LP-2 의 4 차원 구조를 mirror + LP-3 특이값(stress 영역 / variant
+> 없음 / P=large 64KB 고정 / Redis 자원 지표 sampling 보강).
+
+### 3.1 4 차원
+
+| 차원 | 값 | 출처 |
+|------|----|------|
+| **R (RPS)** | 500 RPS | PRD `prd-phase4/01` §3.1 + Q-LOAD-6 (b) 중도 셋 잠금 — stress 영역 |
+| **P (페이로드)** | large 64KB **고정** — `POST /webhooks` request body **전체** 가 정확히 65536 bytes | PRD `01` §3.1 + 단계 1 결정 잠금 2. knee point 1차 탐색 시 payload size variance 를 변수에서 제거 |
+| **T (등록 패턴)** | steady (`constant-arrival-rate`) | PRD `01` §2.3 + §3.1 |
+| **W (측정 윈도우)** | warmup 60s + load 30m + cooldown 60s ≈ 32분 | PRD `01` §5 + Q-LOAD-8 (b) sustained |
+| **인증** | `Authorization: Bearer ${K6_API_BEARER_TOKEN}` | Q-API-1 (b) |
+| **HMAC 헤더** | **부착 없음** (LP-1/LP-2 결정 잠금 1 정합) | PRD `01` §4.3 |
+| **수신자** | `http://api:3000/_demo/receiver` (variant 미지정 = normal default, stub 응답 항상 200) | PRD `01` §6 IT-S1 happy-path stub |
+
+### 3.2 측정 의도 (PRD `prd-phase4/04` §5)
+
+- **knee point 1차 탐색** — p99 / 처리량 / 큐 길이가 LP-2 nominal 대비 비선형
+  으로 증가하는지 식별.
+- **선형성 계산** — N=1 LP-3 처리량 / 기대 처리량(R=500) → 1.0 근처면 knee
+  미도달, < 0.8 면 knee 진입.
+- **bound 원인 분류** — CPU / 메모리 / 네트워크 / 워커 경합 중 어느 자원이
+  먼저 포화 (run-lp-3.sh 의 `redis-stats.jsonl` 30초 sampling 이 1차 자료).
+
+### 3.3 환경변수 입력 (LP-3 특이값)
+
+| 환경변수 | 기본값 | 비고 |
+|----------|--------|------|
+| `STAGE` | `load` | warmup/load 구분 |
+| `DURATION` | `30m` | LP-3 W_load (1800s) |
+| `RPS` | `500` | LP-3 부하 (Q-LOAD-6 (b) stress) |
+
+`VARIANT` / `K6_SEED` 없음 (LP-3 는 variant 미지정 + 페이로드 단일 64KB
+고정이라 PRNG 불필요). LP-1 과 공유 (`K6_TARGET_URL`, `K6_API_BEARER_TOKEN`,
+`K6_RECEIVER_URL`) 는 §5 표 참조.
+
+### 3.4 페이로드 결정성
+
+LP-1 패턴 동일 — `_pad` 길이는 매 요청 `skeleton.length` 로부터 동적 계산.
+`TARGET_BODY_BYTES = 65536`. payload 안에 `idempotencyKey` + root-level
+`idempotencyKey` 양쪽 부착 (M-LOAD-3 fix `ec1da6d` cross-link — 결정성
+패딩 환경에서 동일 HMAC 충돌 회피 표준 패턴 일관성).
+
+### 3.5 시나리오 측 tags 라벨
+
+- `lp_id`: `LP-3`.
+- `stage`: `warmup` / `load`.
+- `endpoint`: `webhooks_post`.
+- `size_bytes`: `65536` (LP-3 는 64KB 고정).
+
+---
+
+## 4. LP-4 시나리오 계약 (`lp-4.js`)
+
+> M-LOAD-4 별도 docs commit 이 본 절을 추가 (PLAN
+> `../../../docs/plan-phase4/05-m-load-4-lp3-lp4.md` §4 단계 2 + §5).
+> LP-4 는 spike pattern (base → spike → base) 으로 `ramping-arrival-rate`
+> executor 를 사용 — §1~§3 의 `constant-arrival-rate` 와 다른 형태.
+
+### 4.1 4 차원 + spike 구조
+
+| 차원 | 값 | 출처 |
+|------|----|------|
+| **R_base (base RPS)** | 100 RPS | PRD `01` §3.1 + Q-LOAD-6 (b) — LP-2 와 동일 nominal 영역 |
+| **R_spike (spike RPS)** | 1000 RPS | PRD `01` §3.1 + Q-LOAD-6 (b) — spike 영역 |
+| **T_spike** | 30s sustained | PLAN §4 단계 2 잠금 |
+| **P (페이로드)** | small 1KB **고정** | PRD `01` §3.1 |
+| **T (등록 패턴)** | spike (`ramping-arrival-rate`) | PRD `01` §2.3 + §3.1 |
+| **stages** | 5m@100 + 10s ramp 100→1000 + 30s@1000 + 10s ramp 1000→100 + 5m@100 = 10m 50s | PLAN §4 단계 2 명세 — lp-4.js 본 commit 이 시간 배분 잠금 |
+| **W_cooldown** | 60s (runner 책임) | PLAN §3.2 |
+| **인증** | `Authorization: Bearer ${K6_API_BEARER_TOKEN}` | Q-API-1 (b) |
+| **HMAC 헤더** | **부착 없음** | LP-1/LP-2/LP-3 결정 잠금 1 정합 |
+| **수신자** | `http://api:3000/_demo/receiver` (variant 미지정 = normal) | PRD `01` §6 IT-S1 happy-path stub |
+
+### 4.2 측정 의도 (PRD `prd-phase4/04` §4.3)
+
+- **spike 흡수 능력** — spike 30s 구간 동안 C1 `queue_depth{job_state="waiting"}`
+  의 최대값.
+- **회복 시간 (time-to-recover)** — spike 종료 후 큐 길이가 baseline (W_base_1
+  60s~300s 분포의 95th percentile 이하) 으로 처음 들어간 시각 - spike 종료 시각.
+- **별도 warmup k6 invocation 없음** — lp-4.js 의 stages 안에 W_base_1 5m 첫
+  60s 가 사실상 warmup 역할 (PLAN §3.2 "+ warmup 60s = 약 13분" 정합). 분석
+  단계 6 의 baseline 분포 추출 시 첫 60s 제외.
+- **"측정 윈도우 초과" 케이스** — 큐 길이가 cooldown 종료까지 baseline 으로
+  회복되지 않으면 회복 시간 = "측정 윈도우 초과" 로 기록 (knee point T3 트리거
+  시사, PRD `04` §6.2).
+
+### 4.3 환경변수 입력 (LP-4 특이값)
+
+| 환경변수 | 기본값 | 비고 |
+|----------|--------|------|
+| `STAGE` | `load` | LP-4 는 단일 stage |
+
+`DURATION` / `RPS` 없음 (lp-4.js 의 stages 가 시간 + RPS 를 hard-coded
+잠금). `VARIANT` / `K6_SEED` 없음 (variant 미지정 + 페이로드 단일 1KB
+고정). LP-1 과 공유 (`K6_TARGET_URL`, `K6_API_BEARER_TOKEN`,
+`K6_RECEIVER_URL`) 는 §5 표 참조.
+
+### 4.4 페이로드 결정성
+
+LP-1 패턴 동일 — `_pad` 길이는 매 요청 `skeleton.length` 로부터 동적 계산.
+`TARGET_BODY_BYTES = 1024`. `payload.idempotencyKey` + root-level
+`idempotencyKey` 양쪽 부착 (LP-3 와 동일 cross-link).
+
+### 4.5 시나리오 측 tags 라벨
+
+- `lp_id`: `LP-4`.
+- `stage`: `load` (LP-4 는 단일 stage).
+- `endpoint`: `webhooks_post`.
+- `size_bytes`: `1024` (LP-4 는 1KB 고정).
+
+### 4.6 spike 시각 정합 (분석 단계 6 cross-link)
+
+run-lp-4.sh 의 `metadata.yaml` 에 시각 오프셋 명시:
+
+- `t_spike_seconds_after_load_start: 300` (W_base_1 5m 종료, ramp up 시작)
+- `t_spike_end_seconds_after_load_start: 340` (sustained 30s 종료, ramp down 시작)
+
+본 오프셋이 보고서 단계 6 의 baseline / spike / recovery 구간 분리 기준.
+
+---
+
+## 5. 환경변수 입력 (LP-1 + 공유)
 
 본 표는 LP-1 시나리오의 기본값. LP-2 특이값(`DURATION=30m`, `RPS=100`,
-`VARIANT`, `K6_SEED`)은 §2.4 참조 — 단, `K6_TARGET_URL` / `K6_API_BEARER_TOKEN`
-/ `K6_RECEIVER_URL` 는 LP-1/LP-2 공유.
+`VARIANT`, `K6_SEED`)은 §2.4 참조. LP-3 특이값(`RPS=500`)은 §3.3 참조.
+LP-4 는 stages hard-coded (§4.3) — 단, `K6_TARGET_URL` / `K6_API_BEARER_TOKEN`
+/ `K6_RECEIVER_URL` 는 LP-1/LP-2/LP-3/LP-4 공유.
 
 | 환경변수 | 기본값 (LP-1) | 출처 |
 |----------|--------|------|
 | `STAGE` | `load` | 본 시나리오 — warmup/load 구분 (idempotencyKey 충돌 회피용 tag) |
-| `DURATION` | `5m` | LP-1 k6 `duration` 값 (LP-2 는 `30m`) |
-| `RPS` | `10` | LP-1 k6 `rate` 값 (LP-2 는 `100`) |
+| `DURATION` | `5m` | LP-1 k6 `duration` 값 (LP-2 는 `30m`, LP-3 는 `30m`, LP-4 는 stages hard-coded) |
+| `RPS` | `10` | LP-1 k6 `rate` 값 (LP-2 는 `100`, LP-3 는 `500`, LP-4 는 stages hard-coded) |
 | `K6_TARGET_URL` | `http://api:3000/webhooks` | docker-compose.yml k6.environment (M-LOAD-1 잠금) |
 | `K6_API_BEARER_TOKEN` | (필수, 누락 시 fail-fast) | docker-compose.yml k6.environment = `${API_BEARER_TOKEN}` |
 | `K6_RECEIVER_URL` | `http://api:3000/_demo/receiver` | 본 시나리오 default — 측정 환경 확장 시 override 가능 |
@@ -138,7 +264,7 @@ PRD `prd-phase4/01` §4.3 + I4.5 + PLAN `08-cross-cutting.md` §4 정합.
 
 ---
 
-## 4. 출력 메트릭
+## 6. 출력 메트릭
 
 k6 의 자체 메트릭(`k6_http_*` 등)은 Prometheus remote write 로 전송된다 —
 docker-compose.yml 의 `K6_PROMETHEUS_RW_SERVER_URL` 매핑이 활성화한다 (M-LOAD-1
@@ -151,7 +277,7 @@ docker-compose.yml 의 `K6_PROMETHEUS_RW_SERVER_URL` 매핑이 활성화한다 (
 | `k6_http_req_failed` | counter | 5xx / 네트워크 에러 비율 |
 | `k6_iteration_duration` | histogram | k6 시나리오 1 iter 의 wall-clock |
 
-### 4.1 본 시스템 메트릭(`webhook_relay_*`) 과의 분리
+### 6.1 본 시스템 메트릭(`webhook_relay_*`) 과의 분리
 
 - k6 의 메트릭은 Prometheus 안에서 별도 job label(예: `job=k6` 또는 remote
   write 의 source label) 로 분리된다.
@@ -159,32 +285,38 @@ docker-compose.yml 의 `K6_PROMETHEUS_RW_SERVER_URL` 매핑이 활성화한다 (
   대상에서 k6 메트릭은 자연 제외 (이름 정규식 `webhook_relay_.*` 외) — PLAN
   `08-cross-cutting.md` §3.
 
-### 4.2 시나리오 측 tags 라벨 (LP-1)
+### 6.2 시나리오 측 tags 라벨 (LP-1)
 
 - `lp_id`: `LP-1` (시나리오 단위 식별자, 카탈로그 정합).
 - `stage`: `warmup` / `load` (k6 stage 단위 분리).
-- `endpoint`: `webhooks_post` (요청 종류 식별 — LP-2~LP-4 의 확장에 대비).
+- `endpoint`: `webhooks_post` (요청 종류 식별).
 
-본 tag 는 k6 메트릭에만 부착되며 본 시스템의 `webhook_relay_*` 메트릭에는
-영향이 없다. LP-2 의 tags 는 §2.6.
+LP-2 의 tags 는 §2.6, LP-3 는 §3.5, LP-4 는 §4.5. 본 tag 는 k6 메트릭에만
+부착되며 본 시스템의 `webhook_relay_*` 메트릭에는 영향이 없다.
 
 ---
 
-## 5. 페이로드 결정성
+## 7. 페이로드 결정성
 
 PRD `prd-phase4/01` §4.3 + I4.5 (페이로드 결정성) + PLAN `08-cross-cutting.md`
 §4 (k6 시나리오의 결정성 패딩) 정합.
 
-- 페이로드 본문 = `{ "url": "<receiver>", "payload": { "event": "lp-1",
-  "_pad": "x...x" }, "idempotencyKey": "<deterministic>" }`.
+- 페이로드 본문 = `{ "url": "<receiver>", "payload": { "event": "lp-N",
+  "_pad": "x...x", "idempotencyKey": "<deterministic>" }, "idempotencyKey":
+  "<deterministic>" }`.
 - `_pad` 길이는 매 요청 동적 계산해서 request body 전체가 정확히 `TARGET_BODY_BYTES`
-  (= 1024 bytes) 가 되도록 (단계 1 결정 잠금 2).
-- `idempotencyKey` = `lp1-<stage>-<__VU>-<__ITER>` — k6 의 결정성 인덱스 +
-  stage 분리. 매 요청 고유 + 재현 가능 + `[A-Za-z0-9_-]+` / 8~128 chars 정합
-  (`packages/demo/src/domain/idempotency-key.ts` 단일 출처).
+  (LP-1=1024 / LP-2=가중치 / LP-3=65536 / LP-4=1024) 가 되도록 (단계 1 결정 잠금 2).
+- `idempotencyKey` = `lp{N}-<stage>-<__VU>-<__ITER>` (LP-2 는 variant 포함) —
+  k6 의 결정성 인덱스 + stage 분리. 매 요청 고유 + 재현 가능 +
+  `[A-Za-z0-9_-]+` / 8~128 chars 정합 (`packages/demo/src/domain/idempotency-key.ts`
+  단일 출처).
+- `payload.idempotencyKey` 부착 — M-LOAD-3 fix `ec1da6d` 가 잠근 표준 패턴.
+  결정성 패딩 환경에서 multiple unique 작업이 동일 HMAC 를 생성하는 충돌
+  회피 (receiver 카운터 키 교란 방지). LP-3/LP-4 는 receiver 카운터를
+  사용하지 않으나 일관성을 위해 동일 부착.
 - **금지:** 난수 페이로드 (`Math.random()` 기반) — 측정 재현성 위반.
 
-### 5.1 결정성의 효과
+### 7.1 결정성의 효과
 
 - 같은 (`__VU`, `__ITER`) → 같은 body → 같은 워커 송신 HMAC 서명 (워커 측
   결정성, `packages/demo/src/domain/hmac.ts`).
@@ -194,27 +326,18 @@ PRD `prd-phase4/01` §4.3 + I4.5 (페이로드 결정성) + PLAN `08-cross-cutti
 
 ---
 
-## 6. 후속 시나리오 (M-LOAD-4 책임)
-
-| 파일 | 마일스톤 | 비고 |
-|------|---------|------|
-| `lp-3.js` | M-LOAD-4 | stress (knee point 식별) |
-| `lp-4.js` | M-LOAD-4 | spike (base → spike → base) |
-
-본 README 의 §1~§5 구조를 LP-3/LP-4 도 mirror 한다. LP-ID 확장 시 본
-README 에 시나리오 계약 절 (§1/§2 형식) 추가 + §3 환경변수 표 갱신 + §7
-측정 스크립트 행 추가.
-
----
-
-## 7. 측정 실행 스크립트
+## 8. 측정 실행 스크립트
 
 | 스크립트 | 책임 |
 |----------|------|
 | `../scripts/collect-metadata.sh` | 측정 호스트 메타데이터 YAML 수집 (M-LOAD-1 산출물) |
 | `../scripts/run-lp-1.sh` | LP-1 8 단계 측정 프로토콜 자동화 (M-LOAD-2 산출물) |
-| `../scripts/run-lp-2.sh` | LP-2 4 변형 × 8 단계 측정 자동화 (M-LOAD-3 단계 3 산출물) |
+| `../scripts/run-lp-2.sh` | LP-2 4 변형 × 8 단계 측정 자동화 (M-LOAD-3 산출물) |
+| `../scripts/run-lp-3.sh` | LP-3 8 단계 + Redis 자원 지표 sampling (M-LOAD-4 산출물) |
+| `../scripts/run-lp-4.sh` | LP-4 8 단계 + 큐 길이 1초 polling (M-LOAD-4 산출물) |
 
 상세 측정 절차:
 - LP-1: `../../../docs/plan-phase4/03-m-load-2-lp1-baseline.md` §3.2.
 - LP-2: `../../../docs/plan-phase4/04-m-load-3-lp2-nominal.md` §3.2.
+- LP-3: `../../../docs/plan-phase4/05-m-load-4-lp3-lp4.md` §3.1.
+- LP-4: `../../../docs/plan-phase4/05-m-load-4-lp3-lp4.md` §3.2.
