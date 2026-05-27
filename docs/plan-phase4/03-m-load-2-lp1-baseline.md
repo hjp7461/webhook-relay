@@ -116,33 +116,54 @@
 
 ### 단계 1 — `feat(docker/k6/scenarios): add LP-1 baseline scenario (R=10, P=small)`
 
+> **2026-05-27 사용자 결정 잠금 2건 (단계 1 진입 시점):**
+>
+> 1. **HMAC 서명 헤더 부착 제외** — `POST /webhooks` 는 Bearer 만 검증하며
+>    `X-Webhook-Signature` 헤더는 **워커 → 외부 수신자** 송신 시 부착하는 헤더
+>    이다(`packages/demo/src/handlers/deliver.ts` + `packages/demo/src/domain/hmac.ts`).
+>    PRD `01` §4.3 의 "HMAC 서명은 본문에 의존" 은 **워커 측 결정성 서명** 을
+>    위해 페이로드 본문이 결정성이어야 한다는 뜻이지 k6 가 부착하라는 뜻이 아니
+>    다. `docker-compose.yml` 의 k6 서비스에도 `WEBHOOK_HMAC_SECRET` 환경변수가
+>    매핑되어 있지 않다(M-LOAD-1 단계 1 + §5 "변경 0건" 잠금 정합). 따라서 k6
+>    시나리오는 HMAC 헤더를 부착하지 않는다.
+> 2. **페이로드 1024 bytes 기준 = `POST /webhooks` request body 전체** —
+>    D3 메트릭(`api_request_body_bytes`) + PRD `01` §2.2 "P = 요청 본문 바이트
+>    분포" 정합. `_pad` 길이를 동적 계산해서 `JSON.stringify({ url, payload:
+>    { event, _pad }, idempotencyKey })` 결과가 정확히 1024 bytes 가 되도록.
+
 - `docker/k6/scenarios/lp-1.js` 신규 생성. k6 JS 시나리오. 명세:
-  - `import http from 'k6/http';` + `import crypto from 'k6/crypto';` (HMAC 서명).
+  - `import http from 'k6/http';` (HMAC 부착 없음 — 결정 잠금 1).
   - `export const options.scenarios.lp_1_baseline`:
     - `executor: 'constant-arrival-rate'`.
     - `rate: 10`, `timeUnit: '1s'` (R = 10 RPS).
     - `duration: __ENV.DURATION || '5m'` (W_load = 5m).
     - `preAllocatedVUs: 5`, `maxVUs: 10`.
     - `tags: { lp_id: 'LP-1', stage: __ENV.STAGE || 'load' }`.
-  - 페이로드 생성: 결정성 패딩 (PRD `prd-phase4/01` §4.3 + `08-cross-cutting.md`
-    §4). 본문 형식:
+  - 페이로드 생성: 결정성 패딩 + request body 전체 1024 bytes 동적 계산 (PRD
+    `prd-phase4/01` §4.3 + `08-cross-cutting.md` §4 + 결정 잠금 2). 본문 형식:
 
     ```js
-    const PAD_TARGET_BYTES = 1024; // small = 1KB
-    const PAYLOAD = JSON.stringify({ event: 'lp-1', _pad: 'x'.repeat(PAD_TARGET_BYTES - 64) });
+    const TARGET_BODY_BYTES = 1024; // small = 1KB (request body 전체)
+    // 결정성 idempotencyKey (8~128 chars, [A-Za-z0-9_-]+).
+    // __VU + __ITER 가 k6 의 결정성 인덱스 — 매 요청 고유 + 재현 가능.
+    const idempotencyKey = `lp1-${__VU}-${__ITER}`.padEnd(8, '0');
+    // _pad 동적 계산: targetBodyBytes - (url + idempotencyKey + JSON 구조 오버헤드).
+    const skeleton = JSON.stringify({ url: TARGET_URL, payload: { event: 'lp-1', _pad: '' }, idempotencyKey });
+    const padLen = TARGET_BODY_BYTES - skeleton.length;
+    const body = JSON.stringify({ url: TARGET_URL, payload: { event: 'lp-1', _pad: 'x'.repeat(padLen) }, idempotencyKey });
     ```
 
-  - HMAC 서명 헤더: `WEBHOOK_HMAC_SECRET` 환경변수 + `crypto.hmac('sha256', secret,
-    PAYLOAD, 'hex')`. 헤더 이름은 `X-Webhook-Signature` (1~2단계 잠금).
   - Authorization: `Bearer ${__ENV.K6_API_BEARER_TOKEN}` (Q-API-1 (b) 잠금).
-  - 대상 URL: `${__ENV.K6_TARGET_URL}` (M-LOAD-1 환경변수).
-  - HTTP method: `POST`. 요청 본문에 stub 수신자 URL 명시 (PRD `prd-phase4/01`
-    §6 IT-S1 매핑 — happy-path stub = 기존 `/_demo/receiver`).
+  - 대상 URL: `${__ENV.K6_TARGET_URL}` (M-LOAD-1 환경변수, = `http://api:3000/webhooks`).
+  - 요청 본문의 `url` 필드: `http://api:3000/_demo/receiver` (PRD `prd-phase4/01`
+    §6 IT-S1 매핑 — happy-path stub. 워커가 이 URL 로 송신).
+  - HTTP method: `POST`.
 - **회귀 가드:** 본 시나리오 파일은 `docker/k6/scenarios/` 안에만 존재. `packages/`
   코드 변경 0건.
 - **금지:**
   - 난수 페이로드 금지 (PRD `prd-phase4/01` §4.3 I4.5 결정성 패딩 의무).
-  - HMAC 외 다른 인증 방식 추가 0건.
+  - Bearer 외 다른 인증/서명 헤더 추가 0건 (결정 잠금 1 정합 — HMAC 헤더
+    부착도 금지).
   - 다른 LP 시나리오 파일(`lp-2.js` 등) 본 commit 에서 추가 금지.
 
 ### 단계 2 — `feat(docker/k6/scripts): add LP-1 measurement runner script`
@@ -168,7 +189,8 @@
   출처:
   - **§1 LP-1 시나리오 계약:** R=10 / P=small 1KB 고정 / T=steady / W=~6.5분.
   - **§2 환경변수 입력:** `STAGE` / `DURATION` / `RPS` / `K6_TARGET_URL` /
-    `K6_API_BEARER_TOKEN` / `WEBHOOK_HMAC_SECRET`.
+    `K6_API_BEARER_TOKEN`. `WEBHOOK_HMAC_SECRET` 는 본 시나리오에서 **부착하지
+    않는다** (단계 1 결정 잠금 1 정합).
   - **§3 출력 메트릭:** k6 자체 메트릭(`k6_http_*`) 이 Prometheus remote write
     로 전송 (PRD `prd-phase4/02` §2.2 정합). 본 메트릭은 `webhook_relay_*` 와
     별도 job label 로 분리 (PRD `prd-phase4/02` §11 R4.8).
@@ -270,9 +292,12 @@
 
 ### 보강 항목 (본 마일스톤 단위)
 
-- [ ] k6 시나리오의 페이로드가 결정성 패딩(`{"_pad": "x".repeat(...)}`) 으로 정확
-  히 1024 bytes (small 고정).
-- [ ] HMAC 서명 헤더(`X-Webhook-Signature`) 가 본 페이로드로 결정성 재현 가능.
+- [ ] k6 시나리오의 페이로드가 결정성 패딩(`{"_pad": "x".repeat(...)}`) 으로
+  `POST /webhooks` request body **전체** 가 정확히 1024 bytes (small 고정,
+  단계 1 결정 잠금 2).
+- [ ] 워커 측 HMAC 서명 결정성은 본 마일스톤 책임 0건 — 1~2단계 IT-S3 가 이미
+  결정성 재현 가능을 단언(`packages/demo/src/domain/hmac.ts` + Q-SEC-2 (a) 정합).
+  k6 시나리오는 HMAC 헤더를 부착하지 않는다(단계 1 결정 잠금 1).
 - [ ] k6 메트릭(`k6_http_*`) 이 Prometheus 의 별도 job label 로 분리 — 3단계
   IT-OBS-11 카디널리티 가드의 단언 대상에서 제외 (PRD `02` §11 R4.8 정합).
 - [ ] 측정 결과 보고서의 YAML 메타데이터 헤더가 PRD `02` §5.1 의 필수 8 항목 전건
