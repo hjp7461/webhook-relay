@@ -235,16 +235,37 @@ pnpm test:integration # 통합 (Testcontainers로 실제 Redis 기동)
       _(IT-S2 ~ IT-S7)_
 - [x] API/Worker 프로세스 분리 — `SERVICE_MODE` env(`all`/`api`/`worker`) +
       `docker compose up --scale worker=N`
-- [ ] 3단계 — 관측성: Prometheus 메트릭 + Grafana 대시보드 _(진행 중 — M-OBS-1~6)_
+- [x] **3단계 — 관측성: Prometheus 메트릭 + Grafana 대시보드** _(M-OBS-1~6 전건
+      완료 + C-MET-1~17 정착)_
   - [x] **M-OBS-1 Bootstrap** — prom-client 도입, `core/metrics.ts` 진화(Q-ARCH-3 약속 이행),
         IT-R1 grep 룰 `webhook_relay_` 예외, `GET /metrics` 라우트 (api 모드 `3000` / worker
         모드 `WORKER_METRICS_PORT=3001`)
-  - [ ] M-OBS-2 Core Metrics Wiring — 도메인 무관 메트릭(C1~C11) instrumented
-  - [ ] M-OBS-3 Demo Metrics Wiring — 도메인 메트릭(D1~D3 / W1~W4) instrumented
-  - [ ] M-OBS-4 Grafana Provisioning — 대시보드 4종 + Prometheus/Grafana 컨테이너
-  - [ ] M-OBS-5 SLO + Alerting Rules — rule YAML 4종(가용성/p99 지연/에러율/DLQ 누적)
-  - [ ] M-OBS-6 Refinement (선택) — 카디널리티 모니터링 + 로그·메트릭 라벨 정합
-- [ ] 4단계 — 부하 테스트 + p50/p99 측정 + 수평 확장 SLO 검증
+  - [x] **M-OBS-2 Core Metrics Wiring** — 도메인 무관 메트릭(C1~C11) instrumented
+  - [x] **M-OBS-3 Demo Metrics Wiring** — 도메인 메트릭(D1~D3 / W1~W4) instrumented
+  - [x] **M-OBS-4 Grafana Provisioning** — 대시보드 4종(overview/reliability/dlq/shutdown)
+        + Prometheus/Grafana 컨테이너 (`docker compose up` 자동 provisioning)
+  - [x] **M-OBS-5 SLO + Alerting Rules** — rule YAML 4종(가용성/p99 등록 지연/p99 전달
+        지연/DLQ 적재율) + 10 alert + burn rate (14.4×/6×)
+  - [x] **M-OBS-6 Refinement** — 카디널리티 모니터링 (IT-OBS-11 ≤ 1000) + 로그·메트릭
+        라벨 정합 (IT-OBS-12)
+- [ ] **4단계 — 부하 테스트 + p50/p99 측정 + 수평 확장 SLO 검증** _(진행 중 — PRD/PLAN
+      정착 + 구현 M-LOAD-2 완료, M-LOAD-3 진행 중)_
+  - [x] **4단계 PRD** — Q-LOAD-1~13 전건 잠금 (`docs/prd-phase4/`)
+  - [x] **4단계 PLAN** — C-LOAD-1~15 카탈로그 정착 (`docs/plan-phase4/`)
+  - [x] **M-LOAD-1 Bootstrap** — `docker-compose.yml` k6 서비스 + cgroup 한정값
+        (Q-LOAD-2) + 측정 호스트 메타데이터 헬퍼 (`docker/k6/scripts/collect-metadata.sh`)
+  - [x] **M-LOAD-2 LP-1 baseline 측정** — LP-1 (R=10 RPS, P=small 1KB) k6 시나리오
+        + 8 단계 측정 자동화 (`run-lp-1.sh`) + 결과 보고서
+        (`docs/prd-phase4/results/LP-1_2026-05-27.md`). SLO 잠정값 전건 통과 +
+        분산 ±5% 안.
+  - [ ] M-LOAD-3 LP-2 nominal sustained — LP-2 (R=100 RPS, P=80/15/5, W=~32분) +
+        IT-S3/S4/S5 부하 변형 (stub) + SLO 잠정값 검증 분포 확보
+  - [ ] M-LOAD-4 LP-3 stress + LP-4 spike — knee point 1차 탐색 (R=500 stress /
+        100→1000 spike)
+  - [ ] M-LOAD-5 수평 확장 — N ∈ {1, 2, 5, 10} × LP-2 + SLO-H-1 (α=0.8) /
+        SLO-H-2 (β=1.2) 검증
+  - [ ] M-LOAD-6 Redis knee + 최종 종합 보고서 + `prd-phase3/04` §3.1 SLO 임계
+        갱신 PR 트리거 (p99 × 1.5, Q-LOAD-9)
 - [ ] (부록) Raw Redis Streams로 큐 내부 직접 구현 + 추상화 비용 벤치마크
 
 ---
