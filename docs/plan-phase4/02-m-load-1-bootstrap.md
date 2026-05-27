@@ -253,6 +253,54 @@
 - `docs/plan/`, `docs/plan-phase3/`, `docs/prd/`, `docs/prd-phase3/`, `docs/adr/`,
   `docs/architecture.md`, `CLAUDE.md`, `README.md` — 본 PLAN 범위 밖.
 
+## 5a. cgroup 호스트 호환성 체크 결과 (M-LOAD-1 종료 시점, 단계 6 commit)
+
+본 §5a 는 §4 단계 6 의 호환성 체크 절차의 **실측 결과** 단일 출처다. 본
+마일스톤이 진입한 측정 호스트의 사양 vs PRD `02-measurement-tools-and-environment.md`
+§4.2 cgroup 한정값 표의 정합을 확인한다.
+
+### 측정 호스트 사양 (2026-05-27 검토)
+
+| 항목 | 값 |
+|------|----|
+| CPU 모델 | Intel Core i7-8750H @ 2.20GHz |
+| CPU 코어 수 | 12 |
+| RAM | 32 GB |
+| OS | macOS 15.7.7 (Darwin 24.6.0) |
+| Docker | 29.4.3 (Server + Client) |
+
+### PRD `02` §4.2 한정값 총합 vs 호스트 사양
+
+| 워커 수 N | 전체 cpus 총합 | 전체 mem 총합 | 호스트 cpus 여유 | 호스트 mem 여유 |
+|-----------|----------------|---------------|------------------|-----------------|
+| N=1 | 6.0 | ~3 GB | ✅ (12 ≥ 6) | ✅ (32 ≥ 3) |
+| N=2 | 7.0 | ~3.5 GB | ✅ (12 ≥ 7) | ✅ |
+| N=5 | 10.0 | ~5 GB | ✅ (12 ≥ 10) | ✅ |
+| N=10 | 15.0 | ~7.5 GB | ⚠️ (12 < 15, over-commit) | ✅ |
+
+전체 총합 계산: redis 1.0 + api 1.0 + worker × N + prometheus 0.5 + grafana
+0.5 + k6 2.0.
+
+### §4 단계 6 기준 3건 평가
+
+1. **N=1 기준 전체 한정값 총합 ≤ 호스트 코어 수** — `6.0 ≤ 12` ✅
+2. **호스트 RAM ≥ 3 GB (총합)** — `32 ≥ 3` ✅
+3. **N=5/10 worker × N cpus ≤ 호스트 코어 - 1** — `N=5: 5 ≤ 11` ✅,
+   `N=10: 10 ≤ 11` ✅
+
+### 결론 + 후속 영향
+
+- **N=1/2/5 (M-LOAD-2~5 기본 경로):** §4 단계 6 의 3건 기준 모두 통과. 전체
+  cgroup 총합도 호스트 여유 안. cgroup 격리 의미 손상 없음.
+- **N=10 (M-LOAD-5):** §4 단계 6 의 3건 기준은 모두 통과(worker × N = 10 ≤
+  호스트 코어-1 = 11). 보조 관찰 — 전체 6 서비스 cgroup 총합(15.0 cpus)이
+  호스트 코어(12)를 over-commit 하므로 측정 시 cgroup 격리 의미가 약해질 가능성
+  존재. M-LOAD-5 진입 전 PRD
+  [`../prd-phase4/04-horizontal-scaling.md`](../prd-phase4/04-horizontal-scaling.md)
+  §2.3 정합 재검토 권장 — 매트릭스 축소 결정은 사용자 위임.
+- **호스트 사양 미달 없음** — M-LOAD-1 종료 시점에서 본 마일스톤은 그대로
+  closeout 가능. M-LOAD-2 진입 차단 사유 없음.
+
 ## 6. 수용 기준 / Done 정의
 
 본 절은 outline `01-milestones.md` §3 M-LOAD-1 의 Exit Criteria 와 글자 단위
