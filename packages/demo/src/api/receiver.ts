@@ -10,6 +10,34 @@ import type { ReceiverStore } from "../receiver/store.js";
 //
 // M-OBS-3 W4 — `webhook_relay_receiver_received_total` 카운터를 본 핸들러
 // 진입점에서 +1 한다(PRD `prd-phase3/02` §4.3). 메트릭 갱신은 동기(I3.5).
+//
+// M-LOAD-3 단계 2 — query param `?variant=normal|s3|s4|s5` 으로 stub 응답 모드
+// 분기. PLAN docs/plan-phase4/04-m-load-3-lp2-nominal.md §4 단계 2 + PRD
+// docs/prd-phase4/01 §6 IT-S 매핑표 정합.
+//
+//   variant=normal (기본) → 항상 200 (1~2단계 IT-S1 회귀 가드).
+//   variant=s3           → HMAC 헤더 값별 카운터 K=2 회 503 후 200 (IT-S3 부하 변형).
+//   variant=s4           → 항상 503                              (IT-S4 부하 변형).
+//   variant=s5           → 항상 400                              (IT-S5 부하 변형).
+//
+// stub 변형 식별자: 워커 송신 헤더의 HMAC 서명값 (`sha256=<hex>`).
+// 같은 jobData → 결정성 본문 + 결정성 HMAC → 재시도 시 같은 카운터 슬롯.
+// HMAC 헤더 이름이 무엇이든(env WEBHOOK_HMAC_HEADER) 식별 가능하도록 prefix
+// 매칭으로 추출 — env / config 외부 의존 0. 2026-05-27 사용자 결정.
+//
+// W4 메트릭(receiverReceivedTotal) 과 store.add 는 variant 와 무관하게 모든
+// 도착 요청에 대해 호출 — "도착 자체" 카운트 + 데모 수신자의 최근 N건 보존
+// 의미를 변형 사이 일관되게 유지.
+
+const VARIANT_S3 = "s3";
+const VARIANT_S4 = "s4";
+const VARIANT_S5 = "s5";
+
+// PLAN §4 단계 2 — s3 변형은 K=2 회 5xx 후 200. attemptsMade 의 의미와
+// 정합(1차 시도 + 2회 5xx 재시도 = 총 3 attempts 의 마지막에 200).
+const S3_RETRY_COUNT = 2;
+
+const HMAC_PREFIX = "sha256=";
 
 export interface ReceiverRouteDeps {
   readonly store: ReceiverStore;
@@ -19,8 +47,14 @@ export async function registerReceiverRoute(
   app: FastifyInstance,
   deps: ReceiverRouteDeps,
 ): Promise<void> {
+  // s3 변형 카운터. key = HMAC 서명값. value = 지금까지 본 요청 수.
+  // 측정 종료 후 컨테이너 재시작으로 초기화 — 별도 영속화 0
+  // (PLAN §4 단계 2 "금지: 별도 영속화 0건").
+  const s3Counters = new Map<string, number>();
+
   app.post(ROUTE_DEMO_RECEIVER, async (req, reply) => {
     // W4 — 도착 직후 카운터 +1. store.add 의 성공/실패와 무관(도착 자체 카운트).
+    // variant 와 무관하게 모든 도착 요청 카운트.
     receiverReceivedTotal.inc();
     // 헤더는 단순 문자열 매핑으로 보존(시크릿 마스킹은 정책상 본 PRD 범위 외).
     const headers: Record<string, string> = {};
@@ -33,6 +67,58 @@ export async function registerReceiverRoute(
       headers,
       body: req.body,
     });
+
+    // variant 분기 — query param 미지정 또는 'normal' 이면 1~2단계 기본 동작.
+    const variant = extractVariant(req.query);
+
+    if (variant === VARIANT_S4) {
+      return reply.code(503).send({ ok: false, variant: VARIANT_S4 });
+    }
+    if (variant === VARIANT_S5) {
+      return reply.code(400).send({ ok: false, variant: VARIANT_S5 });
+    }
+    if (variant === VARIANT_S3) {
+      const hmacKey = extractHmacSignature(headers);
+      if (hmacKey === undefined) {
+        // HMAC 헤더 부재 — 워커 정상 송신에서는 항상 부착되므로 정상 경로에서
+        // 도달 불가. 외부에서 직접 호출한 진단 케이스. 보수적 503.
+        return reply.code(503).send({
+          ok: false,
+          variant: VARIANT_S3,
+          reason: "no_hmac",
+        });
+      }
+      const seen = s3Counters.get(hmacKey) ?? 0;
+      const next = seen + 1;
+      s3Counters.set(hmacKey, next);
+      if (next <= S3_RETRY_COUNT) {
+        return reply
+          .code(503)
+          .send({ ok: false, variant: VARIANT_S3, attempt: next });
+      }
+      return reply
+        .code(200)
+        .send({ ok: true, variant: VARIANT_S3, attempt: next });
+    }
+
+    // variant 미지정 또는 'normal' — 1~2단계 IT-S1/S3/S4/S5 회귀 가드.
     return reply.code(200).send({ ok: true });
   });
+}
+
+function extractVariant(query: unknown): string | undefined {
+  if (query !== null && typeof query === "object" && "variant" in query) {
+    const v = (query as { variant: unknown }).variant;
+    if (typeof v === "string") return v;
+  }
+  return undefined;
+}
+
+function extractHmacSignature(
+  headers: Record<string, string>,
+): string | undefined {
+  for (const v of Object.values(headers)) {
+    if (v.startsWith(HMAC_PREFIX)) return v;
+  }
+  return undefined;
 }
