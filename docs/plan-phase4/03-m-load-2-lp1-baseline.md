@@ -272,6 +272,11 @@
   책임.
 - `packages/**` — 본 마일스톤 코드 변경 0건. 기존 `/_demo/receiver` 사용.
 - `docker-compose.yml` — 본 마일스톤은 변경 0건 (M-LOAD-1 이 이미 k6 서비스 추가).
+  - **예외 (2026-05-27 단계 4 측정 중 발견 + 사용자 결정 잠금):** api 서비스에
+    `/healthz` 기반 healthcheck 추가. M-LOAD-1 의 k6.depends_on.api.condition:
+    `service_healthy` 가 api 서비스 healthcheck 부재로 즉시 실패하던 실효 버그
+    fix. 본 예외는 docker-compose.yml 의 다른 부분 변경 0건 + healthcheck 1건
+    추가에 한정.
 - `docs/plan-phase4/README.md`, `00-decisions-needed.md`, `01-milestones.md` —
   outline 3 파일 변경 0건.
 - `docs/prd-phase4/00~05.md` — PRD 본문 변경 0건.

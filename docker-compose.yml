@@ -59,6 +59,17 @@ services:
       SHUTDOWN_TIMEOUT_MS: "30000"
     ports:
       - "3000:3000"
+    # k6.depends_on.api.condition: service_healthy 를 만족시키기 위한 healthcheck.
+    # /healthz 가 1~2단계의 단일 출처 readiness probe. node fetch 사용으로
+    # 베이스 이미지(node:22-alpine) 안의 추가 의존성(curl/wget) 없이 동작.
+    # M-LOAD-2 단계 4 측정에서 본 healthcheck 누락이 docker compose run k6
+    # 즉시 실패의 직접 원인이었음 — M-LOAD-1 산출물의 실효 검증 누락 fix.
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/healthz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
     restart: unless-stopped
 
   worker:
