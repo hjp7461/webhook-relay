@@ -65,8 +65,12 @@ echo "Rate: ${RPS} RPS"
 
 # ---------- [1] 부트스트랩 ----------
 echo ""
-echo "[1] Bootstrap — docker compose up -d (5 services, k6 excluded)"
-docker compose up -d redis api worker prometheus grafana
+echo "[1] Bootstrap — docker compose up -d --build (5 services, k6 excluded)"
+# --build: api/worker 가 host 의 packages/** 최신 코드로 항상 빌드된다.
+# 본 플래그가 없으면 stale image (e.g. M-OBS-1 이전 빌드) 가 cache 로 재사용되어
+# /metrics 라우트 누락 등의 잠재 회귀가 silent 로 진행될 위험. cache hit 시
+# 빌드는 1~3초로 끝나므로 매 측정에 부담 없음.
+docker compose up -d --build redis api worker prometheus grafana
 
 echo "    Waiting for /healthz 200 (api) ..."
 api_ready=0
