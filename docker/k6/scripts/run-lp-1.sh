@@ -28,6 +28,18 @@ set -eu
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 cd "$REPO_ROOT"
 
+# ---------- cleanup trap ----------
+# 측정 중도 실패(set -e) 에도 컨테이너 정리 보장 — 단일 cleanup 책임.
+# [8] 단계의 explicit cleanup 은 본 trap 이 흡수 (PLAN 08-cross-cutting.md §5
+# Redis flush + 측정 격리 정합).
+cleanup() {
+  rc=$?
+  echo ""
+  echo "[cleanup] docker compose down -v (trap EXIT, exit code=${rc})"
+  docker compose down -v 2>&1 | tail -5 || true
+}
+trap cleanup EXIT
+
 # ---------- 환경 파라미터 ----------
 MEASUREMENT_ID="${MEASUREMENT_ID:-LP-1_$(date -u +%Y-%m-%dT%H-%M-%SZ)}"
 RESULTS_DIR="docker/k6/results/${MEASUREMENT_ID}"
@@ -57,33 +69,51 @@ echo "[1] Bootstrap — docker compose up -d (5 services, k6 excluded)"
 docker compose up -d redis api worker prometheus grafana
 
 echo "    Waiting for /healthz 200 (api) ..."
+api_ready=0
 for i in $(seq 1 30); do
   if curl -sf "${API_URL}/healthz" > /dev/null 2>&1; then
-    echo "    api ready"
+    echo "    api ready (attempt $i)"
+    api_ready=1
     break
   fi
   sleep 2
 done
+if [ "${api_ready}" -ne 1 ]; then
+  echo "    api /healthz NOT ready after 30 attempts (60s)" >&2
+  exit 1
+fi
 
 echo "    Waiting for /metrics 200 (worker) ..."
+worker_ready=0
 for i in $(seq 1 30); do
   if curl -sf "${WORKER_URL}/metrics" > /dev/null 2>&1; then
-    echo "    worker ready"
+    echo "    worker ready (attempt $i)"
+    worker_ready=1
     break
   fi
   sleep 2
 done
+if [ "${worker_ready}" -ne 1 ]; then
+  echo "    worker /metrics NOT ready after 30 attempts (60s)" >&2
+  exit 1
+fi
 
-echo "    Waiting for Prometheus targets up=1 ..."
+echo "    Waiting for Prometheus targets up>=2 ..."
+prom_ready=0
 for i in $(seq 1 30); do
   TARGETS_UP="$(curl -sf "${PROMETHEUS_URL}/api/v1/targets?state=active" 2>/dev/null \
     | grep -o '"health":"up"' | wc -l | tr -d ' ')"
   if [ "${TARGETS_UP:-0}" -ge 2 ]; then
-    echo "    Prometheus targets up=${TARGETS_UP}"
+    echo "    Prometheus targets up=${TARGETS_UP} (attempt $i)"
+    prom_ready=1
     break
   fi
   sleep 2
 done
+if [ "${prom_ready}" -ne 1 ]; then
+  echo "    Prometheus targets NOT up after 30 attempts (60s)" >&2
+  exit 1
+fi
 
 # ---------- [2] 메타데이터 수집 ----------
 echo ""
@@ -190,10 +220,9 @@ prom_query_instant() {
 
 echo "    -> ${PROM_OUT}"
 
-# ---------- [8] 정리 ----------
-echo ""
-echo "[8] Cleanup — docker compose down -v (Redis flush, PLAN 08 §5)"
-docker compose down -v
+# ---------- [8] 정리 — trap EXIT 이 책임 ----------
+# explicit `docker compose down -v` 는 trap cleanup() 으로 이관 (단일 출처).
+# 본 단계 도달 시점에 측정은 완료 — trap 이 정상 종료 cleanup 처리.
 
 echo ""
 echo "=== Measurement complete ==="
