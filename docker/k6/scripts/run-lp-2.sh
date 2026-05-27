@@ -202,6 +202,17 @@ for VARIANT in ${VARIANTS}; do
   echo "[5] Cooldown (${W_COOLDOWN_S}s)"
   sleep "${W_COOLDOWN_S}"
 
+  # ---------- [5b] docker compose logs capture (debug) ----------
+  # M-LOAD-3 단계 4 재측정 debug — receiver / worker container 의 stdout/stderr
+  # 를 결과 디렉터리에 보존. variant 분기 발화 + worker fetch 시 url query
+  # 보존 결정적 검증 (LP-2-S3 W3 attempts ≈ 1 root cause cross-link).
+  echo ""
+  echo "[5b] Capture container logs (api + worker)"
+  docker compose logs api > "${RESULTS_DIR}/api.log" 2>&1 || true
+  docker compose logs worker > "${RESULTS_DIR}/worker.log" 2>&1 || true
+  echo "    -> ${RESULTS_DIR}/api.log ($(wc -l < "${RESULTS_DIR}/api.log") lines)"
+  echo "    -> ${RESULTS_DIR}/worker.log ($(wc -l < "${RESULTS_DIR}/worker.log") lines)"
+
   # ---------- [6] Prometheus query ----------
   # PromQL 단일 출처: docker/prometheus/rules/*.yaml (3단계 잠금).
   # SLI 형태(메트릭 이름 / 라벨 / 집계 함수) + 측정 윈도우 변경 금지(I6.1/I6.2).
