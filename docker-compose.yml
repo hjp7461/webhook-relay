@@ -114,6 +114,15 @@ services:
       # PRD `prd-phase3/03` §3.1 — 명세된 4종 마운트.
       - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./docker/prometheus/rules:/etc/prometheus/rules:ro
+    # 4단계 부하 측정의 k6 metric 누적을 위해 remote write receiver 활성화
+    # (PRD `prd-phase4/02` §2.2, M-LOAD-1 단계 2). image 의 default CMD
+    # (`--config.file` + `--storage.tsdb.path=/prometheus`) 를 그대로 보존하고
+    # receiver 플래그만 1건 추가 — compose `command:` 가 image CMD 를 완전히
+    # override 하므로 default 인자를 명시적으로 재선언한다.
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-remote-write-receiver
     depends_on:
       - api
       - worker
