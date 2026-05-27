@@ -138,3 +138,44 @@ services:
     depends_on:
       - prometheus
     restart: unless-stopped
+
+  # 4단계 부하 측정 도구. Q-LOAD-1 (a) k6 잠금 + Q-LOAD-2 (b) cgroup 격리 잠금
+  # (PRD `prd-phase4/02` §2 + §3 + §4). profiles=["measure"] 가 일반 `docker
+  # compose up` 에서 본 서비스를 비실행으로 분리 — 5 서비스(redis/api/worker/
+  # prometheus/grafana) 의 기존 운영 톤을 보존한다. M-LOAD-1 은 부트스트랩만
+  # 잠그며 실제 LP-N 측정은 M-LOAD-2~6 책임.
+  k6:
+    image: grafana/k6:latest
+    container_name: webhook-relay-k6
+    depends_on:
+      api:
+        # api 가 헬스체크 통과 후 부하 인가 (PRD `02` §3.1 정합).
+        condition: service_healthy
+      worker:
+        # worker 가 첫 인스턴스 기동 후. --scale worker=N 시 N-1 추가 인스턴스는
+        # 같은 docker network 에 합류한 상태에서 k6 가 시작.
+        condition: service_started
+    volumes:
+      # LP-1~LP-4 시나리오 파일은 M-LOAD-2~4 에서 채움. 본 마일스톤은 자리 잠금.
+      - ./docker/k6/scenarios:/scenarios:ro
+      # Q-LOAD-12 (a) Markdown 표 결정 — 결과는 `docs/prd-phase4/results/` 가
+      # 단일 출처(I4.10). 본 볼륨은 k6 의 raw output 임시 보관(필요 시 사용).
+      - ./docker/k6/results:/results
+    environment:
+      # 컨테이너 네트워크에서 api 호스트 직접 접근 — 호스트 NAT 우회로 측정
+      # 정확도 보호 (PRD `02` §3.3 + I4.11).
+      K6_TARGET_URL: http://api:3000/webhooks
+      # api/worker 와 동일한 Bearer 시크릿. compose 사용자가 .env 또는 셸에서 주입.
+      K6_API_BEARER_TOKEN: ${API_BEARER_TOKEN:?Set API_BEARER_TOKEN (>=32 bytes) in .env or shell}
+      # k6 측정 메트릭(`k6_http_*`)을 동일 Prometheus 인스턴스에 누적
+      # (PRD `02` §2.2). 단계 2 에서 prometheus 의 remote write receiver 활성화.
+      K6_PROMETHEUS_RW_SERVER_URL: http://prometheus:9090/api/v1/write
+    deploy:
+      resources:
+        # PRD `02` §4.2 잠정 한정값 — 부하 인가 측에 CPU 여유 확보로 RPS 정확도
+        # 보호 (I4.8, ±5% 허용 오차 §7.2). 호스트 사양 호환성은 §4 단계 6 체크.
+        limits:
+          cpus: "2.0"
+          memory: 1G
+    # 기본 비실행. 측정 시: `docker compose --profile measure up k6`.
+    profiles: ["measure"]
