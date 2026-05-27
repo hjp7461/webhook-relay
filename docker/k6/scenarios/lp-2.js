@@ -114,21 +114,28 @@ export default function () {
 
   // 결정성 패딩 — request body 전체가 targetBytes 가 되도록 _pad 길이를
   // 동적 계산 (단계 1 결정 잠금 2 + PLAN 08-cross-cutting §4).
+  //
+  // payload.idempotencyKey 부착 (2026-05-27 LP-2 측정 fix):
+  // 워커가 외부로 송신하는 본문 = payload 만. 결정성 패딩 + (VU, ITER) 의
+  // idempotencyKey 길이 동일성 조합으로 multiple unique 작업이 동일 HMAC 를
+  // 생성하는 충돌이 발현됨 → receiver 의 s3 카운터 슬롯 충돌 → W3 ≈ 1.
+  // payload 안에 idempotencyKey 를 부착하면 송신 본문이 매 작업 고유 →
+  // receiver 가 본문에서 추출해 카운터 키로 사용 → W3 ≈ 3 정합.
   const skeleton = JSON.stringify({
     url: RECEIVER_URL,
-    payload: { event: 'lp-2', _pad: '' },
+    payload: { event: 'lp-2', _pad: '', idempotencyKey },
     idempotencyKey,
   });
   const padLen = targetBytes - skeleton.length;
   if (padLen < 0) {
     // url / idempotencyKey 가 길어져 skeleton 이 이미 target 초과한 경우.
-    // 현재 default 값에서는 skeleton ~140 bytes 라 small 1024 에서도 양수.
+    // 현재 default 값에서는 skeleton ~165 bytes 라 small 1024 에서도 양수.
     // variant / VU / ITER 길이가 극단적으로 커지면 본 가드가 측정 의미 보존.
     throw new Error(`Cannot pad to ${targetBytes} bytes — skeleton already ${skeleton.length}`);
   }
   const body = JSON.stringify({
     url: RECEIVER_URL,
-    payload: { event: 'lp-2', _pad: 'x'.repeat(padLen) },
+    payload: { event: 'lp-2', _pad: 'x'.repeat(padLen), idempotencyKey },
     idempotencyKey,
   });
 

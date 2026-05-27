@@ -16,14 +16,19 @@ import type { ReceiverStore } from "../receiver/store.js";
 // docs/prd-phase4/01 §6 IT-S 매핑표 정합.
 //
 //   variant=normal (기본) → 항상 200 (1~2단계 IT-S1 회귀 가드).
-//   variant=s3           → HMAC 헤더 값별 카운터 K=2 회 503 후 200 (IT-S3 부하 변형).
+//   variant=s3           → 작업 식별자별 카운터 K=2 회 503 후 200 (IT-S3 부하 변형).
 //   variant=s4           → 항상 503                              (IT-S4 부하 변형).
 //   variant=s5           → 항상 400                              (IT-S5 부하 변형).
 //
-// stub 변형 식별자: 워커 송신 헤더의 HMAC 서명값 (`sha256=<hex>`).
-// 같은 jobData → 결정성 본문 + 결정성 HMAC → 재시도 시 같은 카운터 슬롯.
-// HMAC 헤더 이름이 무엇이든(env WEBHOOK_HMAC_HEADER) 식별 가능하도록 prefix
-// 매칭으로 추출 — env / config 외부 의존 0. 2026-05-27 사용자 결정.
+// s3 카운터 키 (2026-05-27 LP-2 측정에서 fix):
+// 1) req.body.idempotencyKey 가 있으면 우선 사용 — k6 시나리오의 결정성
+//    패딩으로 (VU, ITER) 가 다른 작업이 동일 HMAC 를 만드는 충돌 회피.
+// 2) HMAC 서명값 (`sha256=<hex>`) fallback — 1~2단계 IT-S3 같은 직접 호출
+//    호환 (worker 송신 시 payload 에 idempotencyKey 없는 경우).
+//
+// 초기 디자인 (HMAC 단일 키) 는 결정성 패딩 + idempotencyKey 가 외부 송신
+// 본문에 없는 조합으로 인해 같은 카운터 슬롯에 multiple unique 작업이 hash
+// 되었음. 측정 결과 W3 attempts ≈ 1 (의도 3) 으로 발현. 본 fix 후 W3 ≈ 3.
 //
 // W4 메트릭(receiverReceivedTotal) 과 store.add 는 variant 와 무관하게 모든
 // 도착 요청에 대해 호출 — "도착 자체" 카운트 + 데모 수신자의 최근 N건 보존
@@ -47,9 +52,9 @@ export async function registerReceiverRoute(
   app: FastifyInstance,
   deps: ReceiverRouteDeps,
 ): Promise<void> {
-  // s3 변형 카운터. key = HMAC 서명값. value = 지금까지 본 요청 수.
-  // 측정 종료 후 컨테이너 재시작으로 초기화 — 별도 영속화 0
-  // (PLAN §4 단계 2 "금지: 별도 영속화 0건").
+  // s3 변형 카운터. key = 작업 식별자 (idempotencyKey 우선 / HMAC fallback).
+  // value = 지금까지 본 요청 수. 측정 종료 후 컨테이너 재시작으로 초기화 —
+  // 별도 영속화 0 (PLAN §4 단계 2 "금지: 별도 영속화 0건").
   const s3Counters = new Map<string, number>();
 
   app.post(ROUTE_DEMO_RECEIVER, async (req, reply) => {
@@ -78,19 +83,23 @@ export async function registerReceiverRoute(
       return reply.code(400).send({ ok: false, variant: VARIANT_S5 });
     }
     if (variant === VARIANT_S3) {
-      const hmacKey = extractHmacSignature(headers);
-      if (hmacKey === undefined) {
-        // HMAC 헤더 부재 — 워커 정상 송신에서는 항상 부착되므로 정상 경로에서
-        // 도달 불가. 외부에서 직접 호출한 진단 케이스. 보수적 503.
+      // 카운터 키 우선순위: body.idempotencyKey > HMAC 서명값.
+      // 결정성 패딩 환경에서 multiple unique 작업이 동일 HMAC 를 만드는
+      // 충돌 회피 — k6 시나리오는 payload 안에 idempotencyKey 부착 권장.
+      const counterKey =
+        extractBodyIdempotencyKey(req.body) ?? extractHmacSignature(headers);
+      if (counterKey === undefined) {
+        // 작업 식별자 부재 — 워커 정상 송신에서는 HMAC 항상 부착되므로 정상
+        // 경로에서 도달 불가. 외부에서 직접 호출한 진단 케이스. 보수적 503.
         return reply.code(503).send({
           ok: false,
           variant: VARIANT_S3,
-          reason: "no_hmac",
+          reason: "no_idempotency_key",
         });
       }
-      const seen = s3Counters.get(hmacKey) ?? 0;
+      const seen = s3Counters.get(counterKey) ?? 0;
       const next = seen + 1;
-      s3Counters.set(hmacKey, next);
+      s3Counters.set(counterKey, next);
       if (next <= S3_RETRY_COUNT) {
         return reply
           .code(503)
@@ -119,6 +128,14 @@ function extractHmacSignature(
 ): string | undefined {
   for (const v of Object.values(headers)) {
     if (v.startsWith(HMAC_PREFIX)) return v;
+  }
+  return undefined;
+}
+
+function extractBodyIdempotencyKey(body: unknown): string | undefined {
+  if (body !== null && typeof body === "object" && "idempotencyKey" in body) {
+    const v = (body as { idempotencyKey: unknown }).idempotencyKey;
+    if (typeof v === "string" && v.length > 0) return v;
   }
   return undefined;
 }
