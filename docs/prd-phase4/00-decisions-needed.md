@@ -20,82 +20,103 @@
 
 ---
 
-## 🔴 사전 잠금 필수 (5건)
+## 🔴 사전 잠금 필수 (5건, 전건 Resolved 2026-05-27)
 
 ### Q-LOAD-1 — 측정 도구 결정
 
-**Status:** Open
+**Status:** ✅ Resolved (2026-05-27)
 
-**선택지:**
+**결정:** **(a) k6 (Grafana Labs, JS)**.
 
-- **(a) k6 (Grafana Labs, JS):** 시나리오를 JS 로 작성. Prometheus output 플러그인 내장. CLI + Docker 둘 다 지원. 본 저장소가 이미 Grafana 스택이라 톤 일치.
-- **(b) Artillery (Node.js):** YAML 시나리오 + 플러그인. Node 생태계 친화. Prometheus output 은 플러그인.
-- **(c) Vegeta (Go):** 텍스트 기반 attack list + CLI 파이프. Prometheus output 은 별도 도구. 가장 가벼움.
-- **(d) 직접 구현 (`packages/load-tests/` 신규 패키지):** 본 저장소의 BullMQ producer 헬퍼 재사용. 새 의존성 0 건. 측정 출력은 직접 작성.
+**근거:** 본 저장소가 이미 Grafana 스택을 운영하므로 톤 일치. Prometheus output
+내장으로 measurement → metrics → dashboard 의 자연스러운 파이프라인. 시나리오
+표현력이 가장 강력하고 커뮤니티 자료 풍부.
 
-**트레이드오프:**
+**갱신 영향 (잠금):** `02-measurement-tools-and-environment.md` 가 k6 선택 근거 +
+docker-compose 의 `k6` 서비스 추가 명세를 잠금. 새 Docker 이미지(`grafana/k6`)는
+CLAUDE.md §2 "Docker Compose" 항목 안이라 정합.
 
-- (a) 가장 강력하나 새 Docker 이미지 + JS DSL 학습. 본 저장소 톤(타입 안전, Zod 경계) 과 거리.
-- (b) Node 친화이나 시나리오 표현력 < k6.
-- (c) 가볍지만 본 저장소가 사용하지 않는 Go 도구 + Prometheus 통합 별도 작업.
-- (d) "프로덕션급 작업 큐를 검증된 라이브러리 위에서 조립하는 판단력" 어필 포인트와 정합. 다만 측정 도구의 신뢰성 자체를 우리가 책임져야 함.
-
-**갱신 영향:** `02-measurement-tools-and-environment.md` 본문 + `package.json`/CLAUDE.md §2 기술 스택 표.
+**위 외 선택지:** (b) Artillery (탈락 — 시나리오 표현력 < k6), (c) Vegeta (탈락 —
+Go 도구, 저장소 스택과 분리), (d) 직접 구현 (탈락 — 측정 도구 신뢰성 책임이 부담).
 
 ---
 
 ### Q-LOAD-2 — 측정 환경 토폴로지
 
-**Status:** Open
+**Status:** ✅ Resolved (2026-05-27)
 
-**선택지:**
+**결정:** **(b) 로컬 + cgroup 격리**.
 
-- **(a) 로컬 단일 머신:** `docker compose up` 로 redis + api + worker + prometheus + grafana 동일 호스트. 가장 단순, CI 호환. 단, 측정 머신 자체의 노이즈가 결과에 섞임.
-- **(b) 로컬 + 측정 격리:** docker network 분리 + cgroup CPU/메모리 한정. 격리 강화이나 설정 복잡도 증가.
-- **(c) CI 환경 (GitHub Actions):** Linux runner 에서 정량 측정. 재현성 강이나 runner 사양이 일정하지 않아 결과 분산.
-- **(d) 별도 측정 환경 (예: AWS EC2 1대):** 비용 발생. 사용자 결정 시 본 PRD 가 명세하나 구현은 본 PRD 범위 밖일 수 있음.
+**근거:** 단일 호스트의 노이즈를 cgroup CPU/메모리 한정으로 격리해 재현성을
+높인다. CI 환경(c) 의 runner 사양 분산 위험을 피하면서도 별도 측정 환경(d) 의
+비용을 회피. 본 저장소가 단독 개발 + 데모 패턴이므로 "최대한 단순하나 측정
+신뢰성이 정량적으로 보존되는" 토폴로지.
 
-**갱신 영향:** `02-measurement-tools-and-environment.md` §토폴로지 / `04-horizontal-scaling.md` §실행 환경.
+**갱신 영향 (잠금):** `02-measurement-tools-and-environment.md` §토폴로지 +
+`04-horizontal-scaling.md` §실행 환경 이 docker `cpus` / `mem_limit` 한정값을
+잠금. 결과 표에 측정 호스트의 CPU/메모리 사양을 메타데이터로 기록 의무.
+
+**위 외 선택지:** (a) 격리 없음(탈락 — 재현성 약함), (c) CI(탈락 — 분산), (d)
+별도 환경(탈락 — 비용).
 
 ---
 
 ### Q-LOAD-3 — 본 단계 산출물 범위
 
-**Status:** Open
+**Status:** ✅ Resolved (2026-05-27)
 
-**선택지:**
+**결정:** **(a) PRD 묶음만**.
 
-- **(a) PRD 묶음만:** 3단계와 동일 패턴. PRD 5건(00~05) 작성 → 별도 commit 시리즈로 PLAN(`docs/plan-phase4/`) 작성 → 별도 commit 시리즈로 구현. 결정 분리 명확.
-- **(b) PRD + PLAN 묶음 (구현 별도):** PRD 와 PLAN 을 한 단위로 다룸. 구현(부하 스크립트, 측정 자동화)은 별도. 진입 마찰 감소.
-- **(c) PRD + PLAN + 구현 한 묶음:** 본 단계에서 전체 closeout. 가장 큰 작업, 1회성.
+**근거:** 1~3단계와 동일 패턴(PRD → PLAN → 구현 commit 시리즈). 결정 분리가
+명확해 후속 세션이 어느 단계에 있는지 진입 시점에 즉시 판단 가능. 한 묶음에
+PRD + PLAN + 구현이 섞이면 자율 일탈 위험이 커진다(자율 일탈 사전 승인 규칙
+정합).
 
-**갱신 영향:** 본 세션 작업 범위 + 후속 세션 진입 패턴.
+**갱신 영향 (잠금):** 본 PRD 묶음(`docs/prd-phase4/`) 은 PRD 파일 6건(README +
+00~05) 만. PLAN 묶음(`docs/plan-phase4/`) + 구현(예: `packages/load-tests/` 또는
+`docker/k6/`)은 본 PRD 승인 후 별도 세션. 본 세션은 PRD closeout 까지.
+
+**위 외 선택지:** (b) PRD + PLAN 합본(탈락 — 결정 분리 약화), (c) 한 묶음(탈락 —
+세션 부담 + 단일 출처 원칙 약화).
 
 ---
 
 ### Q-LOAD-4 — Redis 단일 인스턴스 한계 식별 vs Cluster 도입
 
-**Status:** Open
+**Status:** ✅ Resolved (2026-05-27)
 
-**선택지:**
+**결정:** **(a) 단일 인스턴스 한계만 식별**.
 
-- **(a) 단일 인스턴스 한계만 식별 (권장):** Redis 단일 인스턴스로 처리량/지연이 어떤 N(워커 수) 또는 RPS 부근에서 꺾이는지 측정. HA / Cluster 도입은 별도 PRD 위임. 본 저장소가 "단독 개발 + 데모" 패턴이므로 보수적.
-- **(b) Redis Cluster 도입 + 측정:** 본 PRD 가 Cluster 토폴로지를 명세. `docker-compose.yml` 에 Cluster 노드 3+ 추가. 운영 복잡도 증가.
+**근거:** 본 저장소가 단독 개발 + 데모 패턴이며, 1~2단계 PRD 가 "단일 Redis
+인스턴스 + 데모/로컬 전제" 를 명시 잠금. Cluster 도입은 별도 운영 PRD 책임. 본
+PRD 는 단일 인스턴스로 처리량/지연이 어떤 N(워커) 또는 RPS 부근에서 꺾이는지
+**식별** 만 한다(임계 발견 → 운영 PR 트리거).
 
-**갱신 영향:** `04-horizontal-scaling.md` §Redis 토폴로지 / `docker-compose.yml`.
+**갱신 영향 (잠금):** `04-horizontal-scaling.md` §Redis 토폴로지 가 단일 인스턴스
+명세 + "knee point 식별" 측정 절차 잠금. `docker-compose.yml` 변경 없음. HA/Cluster
+도입의 트리거 조건(예: RPS X 부근에서 p99 가 SLO 위반) 만 명문화.
+
+**위 외 선택지:** (b) Cluster 도입(탈락 — 운영 복잡도 + 1~2단계 PRD 전제 갱신
+필요).
 
 ---
 
 ### Q-LOAD-5 — 본 PRD 가 1~2단계 IT-S6 (워커 강제 종료) 의 부하 변형을 다룰지
 
-**Status:** Open
+**Status:** ✅ Resolved (2026-05-27)
 
-**선택지:**
+**결정:** **(a) 정적 부하만**.
 
-- **(a) 정적 부하만 (권장):** 지속적 부하 하에서 SLO 측정만. 워커 강제 종료 같은 카오스 시나리오는 본 PRD 범위 밖 (별도 카오스 엔지니어링 PRD).
-- **(b) 부하 + 카오스 시나리오:** 부하 진행 중 워커 강제 종료 → stalled recovery 가 SLO 안에서 동작하는지 측정. 의미 있는 검증이나 PRD 범위 + 측정 도구 부담 증가.
+**근거:** 부하 측정의 신뢰성과 카오스 시나리오의 신뢰성은 서로 다른 책임이며,
+한 PRD 에서 합치면 양쪽 신뢰성이 약화된다. 1~2단계 IT-S6/S6b 가 이미 카오스
+회복을 단언하므로(stalled recovery + stalled-loss recovery), 본 PRD 는 지속 부하
+하에서 SLO 가 잠금된 임계 안에 머무는지만 측정. 카오스 + 부하 결합은 별도 카오스
+엔지니어링 PRD 위임.
 
-**갱신 영향:** `01-load-profiles.md` §시나리오 카탈로그 + `04-horizontal-scaling.md` §회복 측정.
+**갱신 영향 (잠금):** `01-load-profiles.md` §시나리오 카탈로그 가 정적 부하 프로필
+(LP-N) 만 정의. 카오스/실패 시뮬레이션은 비목표(README §비목표 추가).
+
+**위 외 선택지:** (b) 부하 + 카오스(탈락 — 책임 분리 약화 + 측정 도구 부담 증가).
 
 ---
 
