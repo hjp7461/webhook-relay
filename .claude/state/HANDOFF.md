@@ -7,10 +7,10 @@
 
 ## Meta
 
-- **Last updated:** 2026-05-28 (M-LOAD-3 LP-2 closeout, 9 commits)
-- **At commit:** `92c081e`
+- **Last updated:** 2026-05-28 (M-LOAD-4 closeout, 7 commits)
+- **At commit:** `a6b3b16`
 - **Branch:** `main`
-- **Sync:** `origin/main` 0/9 — push 대기 (`/save-state` 가 처리)
+- **Sync:** `origin/main` 0/7 — push 대기 (`/save-state` 가 처리)
 - **Working tree:** clean (HANDOFF.md 갱신 stage 예정 외)
 
 ---
@@ -18,11 +18,11 @@
 ## Status Overview
 
 - **typecheck:** ✅ 0 errors
-- **tests:** ✅ **37 files / 194 passed** (직전 36 / 185 → +1 file / +9 tests — receiver-variants 신규 7 + fix 회귀 가드 +2)
+- **tests:** ✅ **37 files / 194 passed** (M-LOAD-3 closeout 시점과 동일 — packages/** 변경 0건)
 - **core boundary grep:** ✅ 0 hits
 - **`docker compose config`:** ✅ default 5 서비스 + `--profile measure` 6 서비스 (k6 + api healthcheck)
 - **CI workflow:** `.github/workflows/test.yml` (unit + integration 분리)
-- **누적 commit:** `a035dce`(초기) 이후 190+ commits
+- **누적 commit:** `a035dce`(초기) 이후 197+ commits
 
 ---
 
@@ -46,7 +46,7 @@
 | 3단계 관측성 | ✅ 완료 | M-OBS-1~6 전건 + C-MET-1~17 17건 정착 |
 | 4단계 부하·측정 (PRD 묶음) | ✅ 완료 | `docs/prd-phase4/` 8 파일 + Q-LOAD-1~13 전건 Resolved |
 | 4단계 부하·측정 (PLAN 묶음) | ✅ 완료 | `docs/plan-phase4/` 12 파일 + C-LOAD-1~15 카탈로그 정착 |
-| **4단계 구현 (k6 시나리오 + 측정)** | 🟡 M-LOAD-3 완료 | M-LOAD-3 9 commits closeout. **M-LOAD-4 대기** |
+| **4단계 구현 (k6 시나리오 + 측정)** | 🟡 M-LOAD-4 완료 | M-LOAD-4 7 commits closeout. **M-LOAD-5 대기** |
 | 부록 트랙 (Streams Internals) | ⏳ 미착수 | `packages/streams-internals/` 자리만 예약 |
 
 ---
@@ -57,68 +57,63 @@
 |----|------|------|------|
 | M-LOAD-1 | Bootstrap (k6 서비스 + 골격 + 메타데이터 헬퍼) | ✅ 완료 | 7 commits `7fa3640` → `7e93eed` |
 | M-LOAD-2 | LP-1 baseline 측정 | ✅ 완료 | 9 commits `5cc57f9` → `c1bbfbb`. SLO 잠정값 전건 통과 + 분산 ±5% 안 |
-| **M-LOAD-3** | LP-2 nominal sustained (4 변형) | ✅ **완료** | 9 commits `19b9b7f` → `92c081e`. **SLO 잠정값 + PLAN §3.3 결과 무효 조건 보강 전건 통과** (W3 attempts 3.0 / SLO-4 DLQ 1.0×2 / D3 80/15/5) |
-| **M-LOAD-4** | LP-3 stress + LP-4 spike (knee point 1차) | ⏳ **다음** | `05-m-load-4-lp3-lp4.md` |
-| M-LOAD-5 | 수평 확장 N ∈ {1,2,5,10} × LP-2 + SLO-H 검증 | ⏳ 미착수 | `06-m-load-5-horizontal-scaling.md` |
+| M-LOAD-3 | LP-2 nominal sustained (4 변형) | ✅ 완료 | 9 commits `19b9b7f` → `92c081e`. SLO 잠정값 + PLAN §3.3 결과 무효 조건 보강 전건 통과 |
+| **M-LOAD-4** | LP-3 stress + LP-4 spike (knee point 1차) | ✅ **완료** | 7 commits `3cc5f54` → `a6b3b16`. **LP-3 knee 명백 진입 (Bound = Redis fork-time 메모리, Q-LOAD-4 (a) 정합) + LP-4 회복 시간 33.1s 정상 측정** |
+| **M-LOAD-5** | 수평 확장 N ∈ {1,2,5,10} × LP-2 + SLO-H 검증 | ⏳ **다음** | `06-m-load-5-horizontal-scaling.md` |
 | M-LOAD-6 | Redis knee + 최종 보고서 + SLO 임계 갱신 PR 인계 | ⏳ 미착수 | `07-m-load-6-redis-knee-and-final-report.md` |
 
 ---
 
-## M-LOAD-3 LP-2 closeout (2026-05-27 ~ 2026-05-28, 9 commits)
+## M-LOAD-4 closeout (2026-05-28, 7 commits)
 
 | Commit | 단계 | 변경 |
 |--------|------|------|
-| `19b9b7f` | 1 | feat(docker/k6/scenarios): LP-2 k6 시나리오 (constant-arrival-rate R=100, mulberry32 PRNG + K6_SEED=0). **사용자 결정** — K6_SEED env 결정성 채택 |
-| `df2ae52` | 2 | feat(demo/receiver): variant-aware stub (`?variant=normal\|s3\|s4\|s5`). **사용자 결정** — api/receiver.ts 직접 수정 (PLAN §5 alternative 정합) + HMAC 헤더값 카운터 키 (1차) |
-| `4ba565f` | 3 | feat(docker/k6/scripts): run-lp-2.sh 4 변형 × 8 단계 측정 자동화 (run-lp-1.sh 안전망 동일) |
-| `958b13d` | 7 | test(demo/receiver): receiver-variants 7 IT (1~2단계 IT-S1/S3/S4/S5 회귀 가드) |
-| `37ff8cc` | 6 | docs(docker/k6/scenarios/README): §2 LP-2 절 추가 + 후속 절 +1 밀기 |
-| `cad7526` | + | docs(README): refresh roadmap progress. **사용자 명시 요청** — 로드맵 섹션만 |
-| `ec1da6d` | **fix** | **fix(demo/receiver, docker/k6): body.idempotencyKey s3 counter key.** root cause = 결정성 패딩 + 송신 본문에 idempotencyKey 부재 → multiple unique 작업이 동일 HMAC 충돌 |
-| `35e018c` | chore | chore(docker/k6/scripts): run-lp-2.sh `[5b]` api/worker container logs capture |
-| `92c081e` | 5 | docs(prd-phase4/results): LP-2 4 변형 결과 보고서 (`LP-2_2026-05-27.md`, 316 lines) |
+| `3cc5f54` | 1 | feat(docker/k6/scenarios): LP-3 stress 시나리오 (R=500, P=large 64KB 고정, constant-arrival-rate, W=~32분). idempotencyKey M-LOAD-3 `ec1da6d` cross-link 표준 패턴 |
+| `88ebeef` | 2 | feat(docker/k6/scenarios): LP-4 spike 시나리오 (base 100 → spike 1000 → base 100, T_spike=30s, ramping-arrival-rate stages). 본 commit 이 시간 배분 잠금 |
+| `bd3ba6e` | 3 | feat(docker/k6/scripts): run-lp-3.sh (Redis stats 30s sampling) + run-lp-4.sh (큐 길이 1초 polling). run-lp-2.sh 안전망 mirror (set -eu + trap + --build + readiness gate + [5b] logs capture) |
+| `d7f57c8` | + | docs(docker/k6/scenarios/README): §3 LP-3 + §4 LP-4 절 추가 + 후속 절 +2 밀기 (M-LOAD-3 `37ff8cc` 패턴) |
+| `168d63f` | 5 | docs(prd-phase4/results): LP-3 stress + knee point candidate (321 lines). **사용자 결정 잠금: 측정 변수로 기록** (PLAN §3.3 보강 + §2 정합) |
+| `ffa2e63` | 6 | docs(prd-phase4/results): LP-4 spike + recovery time (277 lines). 회복 시간 33.1초 + 정상 측정 + T3 트리거 미발화 |
+| `a6b3b16` | fix | fix(docker/k6/scripts): run-lp-3.sh line 318 backtick escape (cosmetic stderr, cleanup/exit 무관). LP-3 측정 중 발견 |
 
-### M-LOAD-3 LP-2 측정 핵심 결과 (재측정 2026-05-27T12:53:06Z → 15:04:55Z, 2시간 11분)
+### M-LOAD-4 LP-3 측정 핵심 결과 (R=500 @ P=64KB, W_load=1840s)
 
-- **SLO 잠정값 전건 통과** (LP-2-normal, R=100 RPS): 5xx 0%, 등록 p99 **4.97ms** (임계 500ms 의 0.99%), 전달 p99 **9.91ms** (임계 5000ms 의 0.20%), DLQ 0%.
-- **PLAN §3.3 결과 무효 조건 보강 4건 전건 통과**:
-  - normal: D3 페이로드 p50 735B / p99 54.5KB (80/15/5 정합)
-  - **S3: W3 attempts 평균 = 3.0** (정확히 K+1=3, 시계열 max-min Δ 0.013%)
-  - S4: SLO-4 DLQ 적재율 = 1.0
-  - S5: C5 non_retriable rate = 94.14 RPS avg (1 attempt 정합)
-- **측정 분산** (PRD §7.2): 4 변형 RPS achieved Δ ≤ 0.01%, normal SLO Δ ≤ 0.40%.
-- **카디널리티** 4 변형 165/207/166/166 ≤ 1000 (IT-OBS-11).
+- **knee point 1차 탐색 명확한 결과** — 단일 Redis 인스턴스의 capacity 한계 식별:
+  - 처리량 선형성 = 20.02 / 500 = **0.040** (임계 0.8 의 5%)
+  - SLO-1 5xx 비율 = **100% sustained** (잠정값 0.5% 의 200×)
+  - SLO-2 등록 p99 = 5.0s (k6 timeout cap), LP-2 normal 4.97ms 의 ~1000×
+  - SLO-3 전달 p99 max = 1.62s, LP-2 normal 9.91ms 의 163× (잠정값 5s 안엔 통과)
+  - C1 큐 waiting avg 104,800 / max 174,500 (워커 포화)
+  - cardinality 114 ≤ 1000 (IT-OBS-11 OK)
+- **Bound 원인 = Redis fork-time 메모리** (PRD `prd-phase4/04` §5.3 [4]):
+  1. R=500 × P=64KB → 워커 처리 capacity ~20 RPS → waiting 큐 1.56 GB/min 폭증
+  2. ~3분 후 Redis 메모리 6.4GB 도달 (Docker VM 7.65GB 의 84%)
+  3. RDB snapshot fork() 시 COW 로 일시 ~13GB 필요 → fork 실패
+  4. `stop-writes-on-bgsave-error=true` 활성 → 모든 write 거부
+  5. BullMQ queue.add 거부 → API 5xx 100%
+- 증거: `api.log` 1,211건 + `worker.log` 60건 동일 `ReplyError: MISCONF` 패턴
+- PLAN §3.3 결과 무효 조건 (RPS achieved ±2% 위반) + §2 사용자 결정 위임 → **측정 변수로 기록** (사용자 결정 잠금 2026-05-28)
+- **Q-LOAD-4 (a) "Redis 단일 인스턴스 한계 식별" 정합**
 
-### S3 fix root cause + 1차 측정 무효 사례 (2026-05-27 첫 측정)
+### M-LOAD-4 LP-4 측정 핵심 결과 (base 100 → spike 1000 × 30s → base 100, total 10m 53s)
 
-- 첫 측정 (`08:01Z → 10:46Z`) 의 S3 변형에서 **W3 attempts ≈ 1** 발견 (의도 K+1=3). PLAN §3.3 결과 무효 조건 발동.
-- **Root cause 조사 흐름** — production-flow IT (SERVICE_MODE=all 단일 process) 통과 vs smoke (SERVICE_MODE=api+worker 분리) fail 재현 → debug log 추가 (lp-2.js setup + VU=0 송신 url, receiver.ts 진입점 첫 20 요청) → smoke 2 의 api.log 에서 **첫 8 회 unique 작업이 동일 HMAC `sha256=7f337d428...`** 확인.
-- **원인:** worker 가 외부로 송신하는 본문 = payload 만 (idempotencyKey 는 큐 jobData 안에만). 결정성 패딩으로 (VU, ITER) 가 다른 작업도 동일 `_pad` 길이 생성 → 동일 본문 → 동일 HMAC → receiver 의 `s3Counters` Map 충돌.
-- **Fix (`ec1da6d`):** lp-2.js payload 안에 idempotencyKey 부착 + receiver 가 body.idempotencyKey 우선 추출 (HMAC fallback 유지). receiver-variants IT 에 결정성 패딩 충돌 회귀 가드 2 case 추가 (7 → 9).
-- **검증** smoke 3 (W_LOAD_S=60): W3 attempts avg = 3.0 정확 일치, worker.log started=27,006 / completed=9,002 / failed=18,004 (= 9000 × 2 retry, K=2 정합).
+- **회복 시간 = 33.1초** (baseline waiting p95=2 로 회복) — base RPS 100 안에서 정상 회복
+- baseline (W_base_1 60s~300s, 240s): waiting avg=0.9 / max=2 (정상 ~0)
+- T_spike (300s~340s, 30s): waiting avg=3,697 / max=10,378
+- Ramp down (340s~350s) peak: waiting max=20,096
+- W_base_2 + cooldown (350s~end): 33초만에 baseline 영역 회복
+- SLO-1 5xx = 0% / SLO-4 DLQ = 0% (둘 다 잠정값 안)
+- SLO-2 등록 p99 max 9.9ms (잠정값 500ms 의 1.98%)
+- SLO-3 전달 p99 max 42.65ms (잠정값 5000ms 의 0.85%)
+- cardinality 165 ≤ 1000 (IT-OBS-11 OK)
+- spike RPS 1000 도달 검증 간접 (큐 적재 속도 ~900 RPS, 목표의 90%)
+- **PRD `prd-phase4/04` §6.2 T3 트리거 미발화** (knee point 가 base RPS 안에 안 들어옴)
 
-### 단계 7 IT (commit `958b13d`) 가 처음 잡지 못한 이유
+### LP-3 vs LP-4 분기 정합
 
-매 it() 마다 **고유 HMAC 값을 명시** (예: `sha256=s3-counter-key-1`). 결정성 패딩으로 multiple unique 작업이 동일 HMAC 를 만드는 패턴은 검증되지 않음. fix 와 함께 추가된 신규 케이스 (commit `ec1da6d` 안의 IT 2 case) 가 본 회귀 가드.
-
----
-
-## M-LOAD-3 사용자 결정 잠금 (10건, 본 commit 시리즈 인라인)
-
-| # | 결정 | 적용 |
-|---|------|------|
-| 1 | K6_SEED env + mulberry32 PRNG (결정성 + 측정 호스트 재현성) | `19b9b7f` |
-| 2 | api/receiver.ts 직접 수정 (PLAN §5 alternative 정합 — `receiver/` 디렉터리는 store.ts 만) | `df2ae52` |
-| 3 | s3 카운터 키 (1차) = HMAC 헤더값 | `df2ae52` (이후 fix 로 변경) |
-| 4 | 본 세션에서 전체 측정 background 실행 | 1차 측정 + 재측정 둘 다 |
-| 5 | 측정 진행 모니터링 = 30분 polling (Monitor) | 1차 + 재측정 |
-| 6 | s3 W3 attempts 무효 대응 = s3 변형 재측정 (조사 + fix 우선) | smoke 1~3 + 재측정 |
-| 7 | s3 원인 조사 = production-flow IT 추가 (`_temp-s3-production-flow.integration.test.ts`) | (검증 후 삭제) |
-| 8 | s3 카운터 키 fix = payload.idempotencyKey 부착 + receiver 추출 | `ec1da6d` |
-| 9 | SERVICE_MODE 분리 디버그 = receiver.ts + run-lp-2.sh logs capture + smoke 2 | 1차 fail 분석 + 결정적 검증 |
-| 10 | LP-2 재측정 범위 = 4 변형 전체 (~140분) | 재측정 (commit `35e018c` 후) |
-
-본 10건 모두 commit 메시지 본문 또는 본 HANDOFF 의 fix root cause 절에 cross-link 명시.
+- LP-3 (sustained R=500 × P=64KB) → Redis 메모리 ~3분 만에 fork 영역 진입 → cliff
+- LP-4 (spike 1000 × 30s × P=1KB = +27MB 추가) → fork 영역 진입 안 함 → 정상 흡수
+- 단일 Redis 의 capacity bound 가 **메모리 (fork-time) 이며 CPU 아님**
 
 ---
 
@@ -129,30 +124,29 @@
 의 `Status: Open` 항목은 **0건**.
 
 > **잔여 결정 대기 0건.** 다음 세션은 어떤 항목 위에서도 새 결정을 받을 필요 없이
-> 작업 진입 가능. 단, M-LOAD-5 진입 전 §M-LOAD-5 진입 전 보조 관찰 (M-LOAD-1 단계 6
-> §5a 결론) 참조.
+> 작업 진입 가능. 단, M-LOAD-5 진입 전 §M-LOAD-5 진입 전 권장 절차 참조.
 
 ---
 
 ## 다음 작업 한 줄
 
-**M-LOAD-4 LP-3 stress (R=500) + LP-4 spike (100→1000→100) 측정** — `docs/plan-phase4/05-m-load-4-lp3-lp4.md` 정독 후 LP-3 (R=500 RPS, P=large 64KB 고정, W=~32분) + LP-4 (base→spike→base 30s spike, total ~15분) k6 시나리오 작성 + knee point 1차 탐색 (Redis CPU / p99 / 큐 길이 중 어느 것이 먼저 비선형 진입). 본 마일스톤 commit 시리즈에 LP-3/LP-4 `run-*.sh` 작성 시 `run-lp-1.sh` / `run-lp-2.sh` 의 안전망 (fail-fast readiness + trap cleanup + `--build` flag + [5b] logs capture) 동일 패턴 적용.
+**M-LOAD-5 수평 확장 N ∈ {1, 2, 5, 10} × LP-2** — `docs/plan-phase4/06-m-load-5-horizontal-scaling.md` 정독 후 N ∈ {1, 2, 5, 10} 워커 인스턴스 × LP-2 nominal (R=100, P=80/15/5, W=~32분) 측정 + SLO-H-1 (α=0.8 수평 확장 처리량 선형성) / SLO-H-2 (β=1.2 수평 확장 p99 안정성) 검증. **M-LOAD-5 진입 전 권장 절차 (§Notes 참조)** 적용.
 
 ---
 
 ## Recent commits (head → 10개)
 
 ```
+a6b3b16 fix(docker/k6/scripts): escape backtick in run-lp-3.sh Next steps echo
+ffa2e63 docs(prd-phase4/results): commit LP-4 spike + recovery time
+168d63f docs(prd-phase4/results): commit LP-3 stress + knee point candidate
+d7f57c8 docs(docker/k6/scenarios/README): document LP-3 + LP-4 contracts
+bd3ba6e feat(docker/k6/scripts): add LP-3 + LP-4 measurement runners
+88ebeef feat(docker/k6/scenarios): add LP-4 spike scenario (base 100 → spike 1000 → base 100)
+3cc5f54 feat(docker/k6/scenarios): add LP-3 stress scenario (R=500, P=large)
+c528d5a chore(handoff): snapshot at 92c081e — M-LOAD-3 LP-2 closeout, M-LOAD-4 진입 대기
 92c081e docs(prd-phase4/results): commit LP-2 normal + S3/S4/S5 variants
 35e018c chore(docker/k6/scripts): capture container logs in run-lp-2.sh
-ec1da6d fix(demo/receiver, docker/k6): use body.idempotencyKey as s3 counter key
-cad7526 docs(README): refresh roadmap progress
-37ff8cc docs(docker/k6/scenarios/README): document LP-2 contract + variant
-958b13d test(demo/receiver): integration tests for variant-aware stub
-4ba565f feat(docker/k6/scripts): add LP-2 measurement runner (4 variants)
-df2ae52 feat(demo/receiver): add variant-aware stub response modes
-19b9b7f feat(docker/k6/scenarios): add LP-2 nominal sustained scenario
-8701acd chore(handoff): snapshot at c1bbfbb — M-LOAD-2 LP-1 baseline closeout, M-LOAD-3 진입 대기
 ```
 
 전체 이력은 `git log --oneline -30` 으로 확인.
@@ -161,22 +155,34 @@ df2ae52 feat(demo/receiver): add variant-aware stub response modes
 
 ## Notes (자유 메모, /save-state 시 누적/정리)
 
-### M-LOAD-3 LP-2 closeout (2026-05-27 ~ 2026-05-28)
+### M-LOAD-4 closeout (2026-05-28)
 
-- 9 commits, 본질 fix 1건 (`ec1da6d`) + 측정 인프라 보강 1건 (`35e018c`) + 단계 1/2/3/5/6/7 + README 현행화.
-- **카운터 키 디자인 교훈:** stub variant 의 카운터 키가 결정성 패딩 환경에서 본문 hash 와 충돌할 수 있음. 향후 다른 stub 변형 추가 시 작업 식별자 (idempotencyKey) 우선 사용 + HMAC fallback 패턴 적용.
-- **production-flow IT 패턴:** receiver-variants IT 가 fastify 라우트만 직접 호출하면 worker → API → 큐 → fetch 흐름의 specific 동작을 놓침. M-LOAD-4 의 LP-3/LP-4 변형 (있을 시) 도 동일 회귀 가드 패턴.
-- **debug 흔적 cleanup:** smoke 진행 중 lp-2.js / receiver.ts 에 임시 console.log 추가 후 fix commit (`ec1da6d`) 에서 모두 제거 완료. 현재 코드에 debug 잔여 0.
-- **api/worker container logs capture (`[5b]`):** run-lp-2.sh 에서 cleanup 직전 캡처. 향후 M-LOAD-4/5/6 의 측정 안전망으로도 유지.
+- 7 commits. fix 1건 (`a6b3b16` cosmetic backtick) + 본질 변경 0건 (LP-3 의 knee point bound 가 명확해 재측정 불필요).
+- **knee point bound 명확화 패턴:** LP-3 의 결과 무효 조건 발동이 단일 측정만으로 knee point 위치 + bound 원인을 명확히 식별. 재측정의 추가 정보 가치 0 → 측정 변수로 기록 + 후속 마일스톤 인계.
+- **k6 ramping-arrival-rate vs constant-arrival-rate 분기:** LP-3/LP-4 가 measurement script 의 stage 처리에서 다름. LP-3 (constant) = warmup k6 invocation + load k6 invocation 별도. LP-4 (ramping) = 단일 invocation 으로 stages 안에 base + spike + base 가 들어감. 향후 spike pattern 의 시나리오 추가 시 동일 패턴.
+- **회복 시간 측정 패턴:** queue-depth.jsonl 의 1초 polling + 사후 분석으로 baseline 95th percentile + spike 최대값 + t_recovered 도출. 본 패턴은 향후 다른 spike pattern (LP-5 이상 가능성) 에도 mirror.
 
-### M-LOAD-2 LP-1 baseline closeout (2026-05-27) — 직전 세션
+### M-LOAD-5 진입 전 권장 절차 (M-LOAD-4 발견 사항 + M-LOAD-1 §5a 보조 관찰 cross-link)
 
-- 9 commits `5cc57f9` → `c1bbfbb`. **SLO 잠정값 전건 통과 + 분산 ±5% 안.**
-- bug fix 3건 (M-LOAD-1 + M-OBS-1 산출물의 실효 검증 누락 fix):
-  - `ee419ce` — docker-compose api 서비스 healthcheck 누락.
-  - `50e57b4` — run-lp-1.sh fail-fast readiness gate + trap cleanup.
-  - `11bdd0d` — `--build` flag (stale image 방지).
-- **측정 환경 한계 (baseline ms 영역의 노이즈 floor):** 첫 시도 분산 -13.5% → Docker Desktop 재시작 + 호스트 idle 화 후 +0.18% 회복. M-LOAD-3 진입 전 권장 절차 (호스트 idle + Docker Desktop 재시작) — 본 세션 1차 + 재측정 둘 다 적용.
+수평 확장 N ∈ {1, 2, 5, 10} × LP-2 측정 진입 전 다음 절차 권장:
+
+1. **측정 호스트 idle 화** — Chrome / Slack / IDE 닫기 (PRD `02` §7.3). M-LOAD-2 baseline ms 영역 노이즈 cross-link.
+2. **Docker Desktop 재시작** — 누적 VM 상태 + 캐시 노이즈 제거.
+3. **Docker Desktop VM 메모리 한계 검토** — M-LOAD-4 LP-3 에서 7.65GB 한계가 단일 Redis 의 capacity 결정 요인으로 작용. M-LOAD-5 의 N=10 worker × LP-2 (R=100 nominal) 측정에서 동일 한계가 워커/Redis 합산 영역에 작용할 가능성.
+4. **PRD `prd-phase4/04` §2.3 재검토** — M-LOAD-1 §5a 보조 관찰의 cgroup 총합 15.0 cpus over-commit (호스트 12 core) + M-LOAD-4 의 메모리 한계 관찰을 종합. N=10 의 워커 cgroup 설정 + 호스트 자원 호환성 확인.
+5. **측정 분산 ±5% 초과 시 즉시 사용자 보고** — PRD §7.2 1차 대응 절차 정합.
+6. **`run-lp-5.sh` 작성 시 안전망 패턴 동일 적용** — run-lp-1/2/3.sh 의 fail-fast readiness + trap cleanup + `--build` + `[5b]` logs capture + (필요 시) Redis stats sampling.
+
+### M-LOAD-3 LP-2 closeout (2026-05-27 ~ 2026-05-28) — 직전 세션
+
+- 9 commits `19b9b7f` → `92c081e`. SLO 잠정값 + PLAN §3.3 결과 무효 조건 보강 전건 통과.
+- **카운터 키 디자인 교훈:** stub variant 의 카운터 키가 결정성 패딩 환경에서 본문 hash 와 충돌할 수 있음. M-LOAD-3 fix `ec1da6d` 의 `payload.idempotencyKey` 우선 + HMAC fallback 패턴이 표준 (LP-3/LP-4 도 동일 적용).
+- 자세한 절차/결과는 git log + `docs/prd-phase4/results/LP-2_2026-05-27.md` 참조.
+
+### M-LOAD-2 LP-1 baseline closeout (2026-05-27) — 더 직전 세션
+
+- 9 commits `5cc57f9` → `c1bbfbb`. SLO 잠정값 전건 통과 + 분산 ±5% 안.
+- bug fix 3건 (M-LOAD-1 + M-OBS-1 산출물의 실효 검증 누락 fix). 측정 호스트의 baseline ms 영역 노이즈 floor 관찰.
 
 ### M-LOAD-1 Bootstrap closeout (2026-05-27) — 더 직전 세션
 
@@ -188,23 +194,7 @@ df2ae52 feat(demo/receiver): add variant-aware stub response modes
 
 ### IT-S7 / IT-OBS-9 spawn timeout flaky 관찰 (2026-05-27)
 
-- 직전 세션 `/save-state` 검증 시 1회차 / 2회차 실패, 3회차 통과 사례 1건. 실패 메시지: `child server did not start within 8000ms`. 본 세션 검증 모두 1회 통과 — 재발 없음.
-- **후속 권장 (별도 commit 시리즈 / 별도 결정):** `spawn-server.ts` readyTimeoutMs 8000ms → 15000ms 또는 호스트 부하 감지 후 자동 backoff.
-
-### M-LOAD-5 진입 전 보조 관찰 (M-LOAD-1 단계 6 §5a 결론)
-
-- N=1/2/5 cgroup 호환성 통과. N=10 시 3건 모두 통과 (worker × N = 10 ≤ 호스트 코어-1 = 11).
-- 전체 6 서비스 cgroup 총합(15.0 cpus) 이 호스트 코어(12) **over-commit**. M-LOAD-5 진입 전 PRD `prd-phase4/04` §2.3 정합 재검토 권장.
-
-### M-LOAD-4 진입 전 권장 절차 (M-LOAD-2/3 발견 사항 cross-link)
-
-LP-3 stress (R=500) / LP-4 spike (100→1000→100) 측정 진입 전 다음 절차 권장:
-
-1. **측정 호스트 idle 화** — Chrome / Slack / IDE 닫기 (PRD `02` §7.3). M-LOAD-2 의 baseline ms 영역 노이즈 cross-link.
-2. **Docker Desktop 재시작** — 누적 VM 상태 + 캐시 노이즈 제거. M-LOAD-3 측정 직후 누적 가능.
-3. **측정 분산 ±5% 초과 시 즉시 사용자 보고** — PRD §7.2 1차 대응 절차 정합.
-4. **`run-lp-3.sh` / `run-lp-4.sh` 작성 시 `run-lp-2.sh` 안전망 패턴 동일 적용** — fail-fast readiness + trap cleanup + `--build` + `[5b]` api/worker logs capture.
-5. **LP-3 의 페이로드 = large 64KB 고정** — 결정성 패딩 시 `_pad` 길이 재계산. lp-2.js 의 동적 계산 패턴 mirror.
+- 직전 세션 `/save-state` 검증 시 1회차 / 2회차 실패, 3회차 통과 사례 1건. 본 세션 검증 모두 1회 통과 — 재발 없음. **후속 권장 (별도 commit 시리즈 / 별도 결정):** `spawn-server.ts` readyTimeoutMs 8000ms → 15000ms 또는 호스트 부하 감지 후 자동 backoff.
 
 ### Q-LOAD-1~13 잠금 표 (단일 출처: `prd-phase4/00-decisions-needed.md`)
 
@@ -213,7 +203,7 @@ LP-3 stress (R=500) / LP-4 spike (100→1000→100) 측정 진입 전 다음 절
 | Q-LOAD-1 | k6 (Grafana Labs) |
 | Q-LOAD-2 | 로컬 + cgroup 격리 |
 | Q-LOAD-3 | PRD 묶음만 (3단계 패턴) |
-| Q-LOAD-4 | Redis 단일 인스턴스 한계 식별 |
+| Q-LOAD-4 | Redis 단일 인스턴스 한계 식별 → **M-LOAD-4 LP-3 가 1차 증거 식별, Redis fork-time 메모리 한계** |
 | Q-LOAD-5 | 정적 부하만 (카오스 제외) |
 | Q-LOAD-6 | RPS 중도 셋 (10 / 100 / 500 / 100→1000) |
 | Q-LOAD-7 | 페이로드 운영 평균 (80% / 15% / 5%) |
@@ -233,15 +223,17 @@ LP-3 stress (R=500) / LP-4 spike (100→1000→100) 측정 진입 전 다음 절
 - **단위 (UT):** UT-1~6 + 보강 (metrics-c-catalog, metrics-d-w-catalog).
 - **1~2단계 IT:** IT-S1~S7 + 보강(IT-S1b, IT-S2b, IT-S6b).
 - **3단계 IT:** IT-OBS-1~12, IT-R1.
-- **M-LOAD-3 신규 IT:** receiver-variants 9 case (단계 7 7 case + fix 회귀 가드 2 case).
-- **4단계:** IT-LOAD-N 없음 (Q-LOAD-13 (a) — 부하 회귀는 측정 + 사람 검토 + `docs/prd-phase4/results/` commit 으로 추적).
-- 모두 그린 유지가 후속 작업의 진입 조건.
+- **M-LOAD-3 IT:** receiver-variants 9 case (단계 7 7 case + fix 회귀 가드 2 case).
+- **4단계 측정:** IT-LOAD-N 없음 (Q-LOAD-13 (a) — 부하 회귀는 측정 + 사람 검토 + `docs/prd-phase4/results/` commit 으로 추적).
+- 모두 그린 유지가 후속 작업의 진입 조건. **M-LOAD-4 시점: 37 files / 194 passed 유지.**
 
 ### 후속 정리 항목 (별도 commit 시리즈 / 별도 결정)
 
 - C-LOAD-1/2/4/9/10/11/12/13/14/15 (10건) — architecture.md / README / CLAUDE.md / 신규 PRD 자리 갱신. M-LOAD 마일스톤 종료 시점에 자연스럽게 일부 도래.
 - C-LOAD-6/7/8 (SLO PR 트리거 3건) — M-LOAD-6 인계.
 - `spawn-server.ts` readyTimeoutMs 보강 (flaky 관찰 cross-link).
-- M-LOAD-5 진입 전 PRD `prd-phase4/04` §2.3 재검토 (N=10 over-commit 보조 관찰).
+- M-LOAD-5 진입 전 PRD `prd-phase4/04` §2.3 재검토 (N=10 over-commit + Docker VM 메모리 한계 보조 관찰).
 - **(M-LOAD-3 fix)** stub variant 카운터 키 디자인 패턴 (idempotencyKey 우선 + HMAC fallback) 을 architecture.md 또는 별도 ADR 로 명문화 — 향후 다른 stub 변형 추가 시 동일 패턴 적용.
+- **(M-LOAD-4)** LP-4 보고서 §6.1 의 `register_rps_achieved` query empty (Prometheus rate window 과 step=5s 의 sparse 분포 가설) — 별도 분석 + fix (run-lp-4.sh 의 query step/window 조정).
+- **(M-LOAD-4)** LP-4 보고서 §6.2 의 "run-lp-4.sh 동일 패턴 존재 확인" 표현 부정확 (실제 0건, 본 표현은 LP-3 측정 종료 직후 추정으로 작성) — 다음 보고서 갱신 시 정정.
 - README.md line 203 의 `현재 상태: 117 tests passed` (stale, 실제 194) — 별도 follow-up commit 으로 갱신 (사용자 명시 요청 시).
