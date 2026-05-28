@@ -180,12 +180,28 @@ Producer ──add──> BullMQ Queue ──> Worker pool (수평 확장)
   기본값으로 둔다(Q-OBS-4 (a)). 운영 노출 전에 `.env` 또는 Docker secrets 로 강한 값을
   주입하고, Grafana 컨테이너 재기동. 외부 노출이라면 추가로 reverse proxy 의 TLS + 별도
   사용자 관리(SSO 등) 도입 권장.
-- **SLO 임계는 잠정값 — 4단계 실측 후 재조정:** 3단계 PRD(`prd-phase3/04`) 의 SLO 목표
-  숫자(가용성 99.5% / 등록 지연 p99 ≤ 0.5s / 전달 지연 p99 ≤ 5s / DLQ 비율 ≤ 1%)는
-  **잠정값**이며 운영 부하 측정 전에 채택한 값이다(Q-OBS-11). 4단계 PRD(부하 측정)에서
-  실측 분포를 본 뒤 재조정 가능. SLI PromQL 형태와 측정 윈도우(28d/7d/1d), burn rate
-  (14.4×/6×) 는 잠금된 패턴이므로 변경하지 않는다(I6.1, I6.2). alerting rule YAML 의
-  임계 숫자만 4단계에서 별도 PR 로 갱신.
+- **SLO 임계 — 4단계 실측 기반 갱신 완료 (2026-05-28):** 3단계 PRD(`prd-phase3/04`) 의
+  SLO 목표 숫자가 4단계 측정(`docs/prd-phase4/results/final_2026-05-28.md` §4.2) 기반
+  으로 갱신:
+  - SLO-1 가용성 5xx ≤ **0.5% 유지** (실측 0 → `prd-phase4/03` §4.5 변형)
+  - SLO-2 등록 지연 p99 ≤ **7.5ms** (실측 nominal max 4.99ms × 1.5, Q-LOAD-9 (a))
+  - SLO-3 전달 지연 p99 ≤ **14.9ms** (실측 nominal max 9.96ms × 1.5, Q-LOAD-9 (a))
+  - SLO-4 DLQ 적재율 ≤ **1% 유지** (실측 0 → §4.5 변형)
+
+  SLI PromQL 형태 + 측정 윈도우 (28d/7d/1d) + burn rate (14.4×/6×) 는 잠금된 패턴
+  (I6.1, I6.2) — 본 갱신에서도 변경 0건. alerting rule YAML 의 임계 숫자는 commit
+  `a338716` 으로 동시 갱신 (`docker/prometheus/rules/webhook-relay-latency.yaml`).
+- **수평 확장 SLO-H-1 / SLO-H-2 — 4단계 실측 기반 1차 검증 (2026-05-28):** 4단계 PRD
+  (`prd-phase4/04`) 가 새로 정의한 상대 SLO 의 본 시스템 측정 결과:
+  - **SLO-H-1 (α=0.8 처리량 선형성):** nominal 영역 (R=100 LP-2) 의 capacity 미달
+    영역이라 4 N (1/2/5/10) 모두 위반 (linearity = 1/N). **시스템적 한계** — 부하
+    영역 의존성으로 SLO-H-1 의 의미 보존은 capacity 초과 영역의 측정 필요 (PRD
+    §I4.22). 본 한계가 후속 PRD 진입 트리거 (Capacity 초과 영역 부하 측정 PRD).
+  - **SLO-H-2 (β=1.2 p99 안정성):** 4 N 모두 통과 (max ratio +0.24%). **본 시스템의
+    수평 확장 능력에 대한 정량적 약속의 1차 증거**. N=10 cgroup over-commit 영역
+    (14 컨테이너 / 12 core) 도 p99 안정.
+  - 자세한 측정 결과 = `docs/prd-phase4/results/horizontal-scaling_2026-05-28.md`
+    + 종합 보고서 `docs/prd-phase4/results/final_2026-05-28.md` §5.
 
 > 운영 전환 전에 검토할 항목 전체 목록은 `docs/architecture.md §5`의 "보장하지 않는다" 절
 > 참조.
@@ -251,8 +267,8 @@ pnpm test:integration # 통합 (Testcontainers로 실제 Redis 기동)
         지연/DLQ 적재율) + 10 alert + burn rate (14.4×/6×)
   - [x] **M-OBS-6 Refinement** — 카디널리티 모니터링 (IT-OBS-11 ≤ 1000) + 로그·메트릭
         라벨 정합 (IT-OBS-12)
-- [ ] **4단계 — 부하 테스트 + p50/p99 측정 + 수평 확장 SLO 검증** _(진행 중 —
-      M-LOAD-4 완료, M-LOAD-5 진입 대기)_
+- [x] **4단계 — 부하 테스트 + p50/p99 측정 + 수평 확장 SLO 검증** _(M-LOAD-1~6
+      완료, 4단계 PLAN 묶음 closeout 2026-05-28)_
   - [x] **4단계 PRD** — Q-LOAD-1~13 전건 잠금 (`docs/prd-phase4/`)
   - [x] **4단계 PLAN** — C-LOAD-1~15 카탈로그 정착 (`docs/plan-phase4/`)
   - [x] **M-LOAD-1 Bootstrap** — `docker-compose.yml` k6 서비스 + cgroup 한정값
@@ -274,10 +290,15 @@ pnpm test:integration # 통합 (Testcontainers로 실제 Redis 기동)
         + `LP-4_2026-05-28.md`). **LP-3 knee 명백 진입 — Bound = 단일 Redis
         인스턴스의 RDB snapshot fork-time 메모리 한계** (Q-LOAD-4 (a) 정합).
         LP-4 회복 시간 33.1초 정상 측정 + PRD §6.2 T3 트리거 미발화.
-  - [ ] M-LOAD-5 수평 확장 — N ∈ {1, 2, 5, 10} × LP-2 + SLO-H-1 (α=0.8) /
-        SLO-H-2 (β=1.2) 검증
-  - [ ] M-LOAD-6 Redis knee + 최종 종합 보고서 + `prd-phase3/04` §3.1 SLO 임계
-        갱신 PR 트리거 (p99 × 1.5, Q-LOAD-9)
+  - [x] **M-LOAD-5 수평 확장** — N ∈ {1, 2, 5, 10} × LP-2 nominal 측정.
+        **SLO-H-1 (α=0.8) 4 N 위반 (부하 영역 의존성, PRD §I4.22 시스템적
+        한계 식별)** + **SLO-H-2 (β=1.2) 4 N 통과** (max ratio +0.24%). 결과
+        보고서 = `docs/prd-phase4/results/horizontal-scaling_2026-05-28.md`.
+  - [x] **M-LOAD-6 Redis knee + 최종 종합 보고서 + SLO 임계 갱신** —
+        M-LOAD-2~5 종합 분석 + Redis knee point 식별 (Bound = 단일 Redis
+        fork-time 메모리, Q-LOAD-4 (a)) + HA / Cluster T1~T5 트리거 명문화.
+        SLO 재조정 (Q-LOAD-9 (a) p99 × 1.5) 적용으로 `prd-phase3/04` §3.1
+        갱신 commit `a338716`. 종합 보고서 = `docs/prd-phase4/results/final_2026-05-28.md`.
 - [ ] (부록) Raw Redis Streams로 큐 내부 직접 구현 + 추상화 비용 벤치마크
 
 ---
