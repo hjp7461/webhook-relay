@@ -62,8 +62,9 @@ VARIANTS="${VARIANTS:-normal s3 s4 s5}"
 K6_SEED="${K6_SEED:-0}"
 
 # 호스트 측 endpoint (docker-compose 의 외부 포트 매핑)
+# worker /metrics 는 호스트 포트 매핑 없음 (M-LOAD-5 N>1 fix `db23169`). worker
+# readiness 는 Prometheus targets up>=2 단계가 일괄 판정.
 API_URL="${API_URL:-http://localhost:3000}"
-WORKER_URL="${WORKER_URL:-http://localhost:3001}"
 PROMETHEUS_URL="${PROMETHEUS_URL:-http://localhost:9090}"
 
 echo "=== LP-2 nominal sustained measurement ==="
@@ -134,10 +135,7 @@ for VARIANT in ${VARIANTS}; do
   echo "    Waiting for /healthz 200 (api) ..."
   wait_for_curl_ok "${API_URL}/healthz" "api" 30 || exit 1
 
-  echo "    Waiting for /metrics 200 (worker) ..."
-  wait_for_curl_ok "${WORKER_URL}/metrics" "worker" 30 || exit 1
-
-  echo "    Waiting for Prometheus targets up>=2 ..."
+  echo "    Waiting for Prometheus targets up>=2 (api + worker) ..."
   prom_ready=0
   for i in $(seq 1 30); do
     TARGETS_UP="$(curl -sf "${PROMETHEUS_URL}/api/v1/targets?state=active" 2>/dev/null \

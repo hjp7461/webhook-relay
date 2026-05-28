@@ -61,8 +61,9 @@ W_COOLDOWN_S="${W_COOLDOWN_S:-60}"
 QUEUE_POLL_INTERVAL_S="${QUEUE_POLL_INTERVAL_S:-1}"
 
 # 호스트 측 endpoint
+# worker /metrics 는 호스트 포트 매핑 없음 (M-LOAD-5 N>1 fix `db23169`). worker
+# readiness 는 Prometheus targets up>=2 단계가 일괄 판정.
 API_URL="${API_URL:-http://localhost:3000}"
-WORKER_URL="${WORKER_URL:-http://localhost:3001}"
 PROMETHEUS_URL="${PROMETHEUS_URL:-http://localhost:9090}"
 
 echo "=== LP-4 spike measurement ==="
@@ -141,10 +142,7 @@ docker compose up -d --build redis api worker prometheus grafana
 echo "    Waiting for /healthz 200 (api) ..."
 wait_for_curl_ok "${API_URL}/healthz" "api" 30 || exit 1
 
-echo "    Waiting for /metrics 200 (worker) ..."
-wait_for_curl_ok "${WORKER_URL}/metrics" "worker" 30 || exit 1
-
-echo "    Waiting for Prometheus targets up>=2 ..."
+echo "    Waiting for Prometheus targets up>=2 (api + worker) ..."
 prom_ready=0
 for i in $(seq 1 30); do
   TARGETS_UP="$(curl -sf "${PROMETHEUS_URL}/api/v1/targets?state=active" 2>/dev/null \

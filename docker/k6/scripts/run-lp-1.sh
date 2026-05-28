@@ -54,8 +54,10 @@ W_COOLDOWN_S="${W_COOLDOWN_S:-30}"
 RPS="${RPS:-10}"
 
 # 호스트 측 endpoint (docker-compose 의 외부 포트 매핑)
+# worker /metrics 는 호스트 포트 매핑 없음 (M-LOAD-5 N>1 fix `db23169`). worker
+# readiness 는 Prometheus targets up>=2 단계가 일괄 판정 — 컨테이너 네트워크
+# `worker:3001` scrape 가 응답하면 worker 메트릭 라우트 동작 확인.
 API_URL="${API_URL:-http://localhost:3000}"
-WORKER_URL="${WORKER_URL:-http://localhost:3001}"
 PROMETHEUS_URL="${PROMETHEUS_URL:-http://localhost:9090}"
 
 echo "=== LP-1 baseline measurement: ${MEASUREMENT_ID} ==="
@@ -87,22 +89,7 @@ if [ "${api_ready}" -ne 1 ]; then
   exit 1
 fi
 
-echo "    Waiting for /metrics 200 (worker) ..."
-worker_ready=0
-for i in $(seq 1 30); do
-  if curl -sf "${WORKER_URL}/metrics" > /dev/null 2>&1; then
-    echo "    worker ready (attempt $i)"
-    worker_ready=1
-    break
-  fi
-  sleep 2
-done
-if [ "${worker_ready}" -ne 1 ]; then
-  echo "    worker /metrics NOT ready after 30 attempts (60s)" >&2
-  exit 1
-fi
-
-echo "    Waiting for Prometheus targets up>=2 ..."
+echo "    Waiting for Prometheus targets up>=2 (api + worker) ..."
 prom_ready=0
 for i in $(seq 1 30); do
   TARGETS_UP="$(curl -sf "${PROMETHEUS_URL}/api/v1/targets?state=active" 2>/dev/null \
