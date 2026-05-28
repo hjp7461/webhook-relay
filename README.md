@@ -23,7 +23,10 @@ pnpm install
 docker compose up
 # API: http://localhost:3000
 # 대시보드: http://localhost:3000/dashboard
-# 메트릭: http://localhost:3000/metrics (api), http://localhost:3001/metrics (worker)
+# 메트릭: http://localhost:3000/metrics (api). worker /metrics 는 Prometheus 가
+# 컨테이너 네트워크 worker:3001 으로 scrape (host port 매핑 없음, M-LOAD-5 fix
+# db23169 — --scale worker=N 충돌 회피). 호스트 직접 확인: docker compose exec
+# worker curl -sf http://localhost:3001/metrics
 # Prometheus: http://localhost:9090
 # Grafana: http://localhost:3002 (admin/admin — 데모 기본값)
 ```
