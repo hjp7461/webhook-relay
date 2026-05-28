@@ -1,10 +1,12 @@
 # Prometheus alerting rules — SLO-2 등록 지연 + SLO-3 전달 지연.
 #
 # PRD `docs/prd-phase3/04-slo-and-alerts.md` §5.2.2 의 YAML 을 글자 단위로 옮긴다.
-# - SLO-2: POST /webhooks 응답 p99 ≤ 0.5s (7일 윈도우).
-# - SLO-3: 워커 success 처리 wall-clock p99 ≤ 5s (7일 윈도우, 재시도 미포함).
+# - SLO-2: POST /webhooks 응답 p99 ≤ 7.5ms (7일 윈도우).
+# - SLO-3: 워커 success 처리 wall-clock p99 ≤ 14.9ms (7일 윈도우, 재시도 미포함).
 #
-# 임계 0.5s / 5s 는 잠정값(Q-OBS-11 (a)). 운영 측정 후 4단계에서 재조정 가능.
+# 임계 7.5ms / 14.9ms 는 4단계 실측 기반 갱신 (Q-OBS-11 closed, 2026-05-28
+# `docs/prd-phase4/results/final_2026-05-28.md` §4.2 정합).
+# nominal 영역 max p99 × 1.5 (Q-LOAD-9 (a) Google SRE Workbook).
 groups:
   - name: webhook-relay-latency
     interval: 30s
@@ -14,22 +16,22 @@ groups:
           histogram_quantile(
             0.99,
             sum by (le) (rate(webhook_relay_api_request_duration_seconds_bucket{route="/webhooks"}[5m]))
-          ) > 0.5
+          ) > 0.0075
         for: 10m
         labels:
           severity: ticket
           slo: SLO-2-register-latency
         annotations:
-          summary: "POST /webhooks p99 latency > 500ms for 10m"
+          summary: "POST /webhooks p99 latency > 7.5ms for 10m"
       - alert: WebhookRelayDeliveryLatencyP99High
         expr: |
           histogram_quantile(
             0.99,
             sum by (le) (rate(webhook_relay_worker_processing_duration_seconds_bucket{outcome="success"}[5m]))
-          ) > 5
+          ) > 0.0149
         for: 10m
         labels:
           severity: ticket
           slo: SLO-3-delivery-latency
         annotations:
-          summary: "Worker success processing p99 latency > 5s for 10m"
+          summary: "Worker success processing p99 latency > 14.9ms for 10m"

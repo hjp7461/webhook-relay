@@ -2,8 +2,11 @@
 #
 # PRD `docs/prd-phase3/04-slo-and-alerts.md` §5.2.1 의 YAML 을 글자 단위로 옮긴다.
 # 임계값은 SLO 목표(0.5%) × burn rate(14.4× / 6×) 로 산출(Google SRE Workbook
-# multi-window multi-burn-rate 표준). 본 PRD 가 잠정값을 잠근다(Q-OBS-11 (a) /
-# Q-OBS-12 (a)). 운영 측정 후 4단계에서 재조정 가능.
+# multi-window multi-burn-rate 표준).
+# - SLO-1 임계 0.5% 는 4단계 실측 기반 갱신 시 잠정값 유지 (Q-OBS-11 closed,
+#   2026-05-28 `docs/prd-phase4/results/final_2026-05-28.md` §4.2). nominal 영역
+#   실측 5xx 비율 = 0% → `prd-phase4/03` §4.5 변형 적용으로 잠정값 유지.
+# - burn rate 14.4× / 6× 는 본 PRD 가 잠금 (Q-OBS-12 (a), I6.2 정합).
 #
 # 라우팅(Alertmanager/PagerDuty/Slack/온콜)은 본 PRD 범위 밖(`04` §5.4).
 # severity / slo 라벨까지만 정의한다.
