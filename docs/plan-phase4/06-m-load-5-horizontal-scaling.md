@@ -108,6 +108,14 @@ LP-1 / LP-2 / LP-3 / LP-4 와 동일 + 본 마일스톤 보강:
   되지 않으면 부분 측정. PRD `prd-phase4/04` §R4.18 정합 — worker 포트 매핑 충돌
   은 Prometheus scrape 에 영향 없음(컨테이너 network).
 - k6 의 RPS 도달률이 목표 R=100 의 ±2% 를 벗어남.
+- **(2026-05-28 추가)** `docker/prometheus.yml` 의 worker scrape 가 single
+  static target — `docker compose up --scale worker=N` (N>=2) 시 docker compose
+  service DNS round-robin 으로 매 scrape (15s) 마다 N 인스턴스 중 1 응답 →
+  counter 가 인스턴스 사이 round-robin 으로 점프 → `rate()` PromQL 의 N 인스턴스
+  합산 정확도 저하 가능성. 본 한계는 측정 무효 조건은 **아니며** (사용자 결정
+  2026-05-28 정합 — single target 동작 그대로 진행), SLO-H-1/H-2 의 의미 보존성
+  평가에 영향 → 결과 보고서 단계 3 의 "정확도 한계" 절에 명시 + 사후 분석.
+  N=1 측정은 본 한계의 영향 없음 (단일 인스턴스 → round-robin 없음).
 
 ## 4. 구현 단계 (커밋 단위)
 
@@ -227,8 +235,12 @@ LP-1 / LP-2 / LP-3 / LP-4 와 동일 + 본 마일스톤 보강:
 
 - `packages/**` — 본 마일스톤 코드 변경 0건.
 - `docker/k6/scenarios/lp-*.js` — 본 마일스톤은 새 시나리오 추가 없음.
-- `docker-compose.yml` — 본 마일스톤 변경 0건. `--scale worker=N` 은 docker
-  compose CLI 옵션이며 yml 변경 불요.
+- `docker-compose.yml` — 본 마일스톤 진입 후 N>=2 측정 시 worker host port
+  매핑 충돌 (PRD §R4.18 정정 정합) 발견 → fix commit `db23169` 가 worker
+  `ports: "3001:3001"` 제거 (**1건 예외**). 본 예외는 PLAN 진입 후 사용자
+  결정 (2026-05-28) 으로 추가된 영역이며, M-LOAD-5 자체의 자율 일탈은 아님
+  (PRD §R4.18 의 잘못된 가정에서 비롯된 구조 변경). `--scale worker=N` 은
+  docker compose CLI 옵션이며 yml 의 다른 영역 변경 불요.
 - `docker/prometheus.yml`, `docker/grafana/**` — 본문 변경 0건.
 - `docs/plan-phase4/README.md`, `00-decisions-needed.md`, `01-milestones.md` —
   outline 3 파일 변경 0건.
