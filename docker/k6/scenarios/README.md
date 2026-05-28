@@ -335,9 +335,95 @@ PRD `prd-phase4/01` §4.3 + I4.5 (페이로드 결정성) + PLAN `08-cross-cutti
 | `../scripts/run-lp-2.sh` | LP-2 4 변형 × 8 단계 측정 자동화 (M-LOAD-3 산출물) |
 | `../scripts/run-lp-3.sh` | LP-3 8 단계 + Redis 자원 지표 sampling (M-LOAD-4 산출물) |
 | `../scripts/run-lp-4.sh` | LP-4 8 단계 + 큐 길이 1초 polling (M-LOAD-4 산출물) |
+| `../scripts/run-horizontal-scaling.sh` | N ∈ {1, 2, 5, 10} × LP-2 normal 8 단계 (M-LOAD-5 산출물) |
 
 상세 측정 절차:
 - LP-1: `../../../docs/plan-phase4/03-m-load-2-lp1-baseline.md` §3.2.
 - LP-2: `../../../docs/plan-phase4/04-m-load-3-lp2-nominal.md` §3.2.
 - LP-3: `../../../docs/plan-phase4/05-m-load-4-lp3-lp4.md` §3.1.
 - LP-4: `../../../docs/plan-phase4/05-m-load-4-lp3-lp4.md` §3.2.
+- 수평 확장 (N 매트릭스): `../../../docs/plan-phase4/06-m-load-5-horizontal-scaling.md` §3.2.
+
+---
+
+## 9. 수평 확장 runner 계약 (`run-horizontal-scaling.sh`)
+
+> M-LOAD-5 단계 4 가 본 절을 추가 (PLAN
+> `../../../docs/plan-phase4/06-m-load-5-horizontal-scaling.md` §4 단계 4 + §5).
+> 본 절은 §8 표의 `run-horizontal-scaling.sh` 행을 LP-N 시나리오와 다른 N 매트릭스
+> 입출력 계약으로 명문화. 본 스크립트는 `lp-2.js` 시나리오를 재사용 (변경 0).
+
+### 9.1 입력 (환경변수)
+
+| 환경변수 | 기본값 | 비고 |
+|----------|--------|------|
+| `N_VALUES` | `'1 2 5 10'` | 공백 구분 N 매트릭스. PRD §I4.19 폐쇄성 — 임의 N 추가 금지 |
+| `W_WARMUP_S` | `60` | 각 N 별 warmup 윈도우 |
+| `W_LOAD_S` | `1800` | 각 N 별 load 윈도우 (30m sustained, Q-LOAD-8 (b)) |
+| `W_COOLDOWN_S` | `60` | 각 N 별 cooldown 윈도우 |
+| `RPS` | `100` | LP-2 normal 부하 (Q-LOAD-6 (b)) |
+| `K6_SEED` | `0` | 페이로드 크기 PRNG 시드 (lp-2.js §2.5) |
+
+LP-2 시나리오 공유 (`K6_TARGET_URL`, `K6_API_BEARER_TOKEN`, `K6_RECEIVER_URL`)
+는 §5 표 참조. VARIANT=normal 잠금 (4 N 매트릭스가 LP-2 normal 만 사용 —
+PLAN §3.1).
+
+### 9.2 8 단계 프로토콜 (각 N 마다)
+
+LP-2 runner (`run-lp-2.sh`) 의 variant loop 패턴을 N loop 로 mirror. 각 N:
+
+1. **[1] Bootstrap** — `docker compose up -d --build --scale worker=${N} redis api worker prometheus grafana`.
+2. **Readiness gate** — `/healthz 200 (api)` + `Prometheus targets up >= 2`
+   (api + worker job groups). worker host port 매핑 없음 (fix `db23169`).
+3. **[2] 메타데이터** — `collect-metadata.sh` + `lp_id: LP-2` + `rps: ${RPS}` +
+   `variant: normal` + `k6_seed: ${K6_SEED}` + `worker_count: ${N}` 부착.
+4. **[3] Warmup / [4] Load / [5] Cooldown** — `lp-2.js` 단일 invocation × 3
+   (warmup/load 각각 별도 invocation).
+5. **[5b] Logs capture** — `docker compose logs api/worker` (N 인스턴스 통합).
+6. **[6] Prometheus query** — SLO-1~4 + **SLO-H-1 (throughput completed)** +
+   **SLO-H-2 (worker_processing_duration_seconds p99)** + C1 큐 길이 + 등록
+   RPS + scrape coverage (`min(up{job="webhook-relay-worker"})`).
+7. **[8] Cleanup** — `docker compose down -v` 로 다음 N 진입 전 Redis flush.
+
+### 9.3 출력 (`docker/k6/results/LP-2-N${N}_<timestamp>/`)
+
+- `metadata.yaml` — 호스트 + cgroup + `worker_count: N` + `lp_id: LP-2`.
+- `k6-warmup.json` / `k6-load.json` — k6 summary export.
+- `prom-queries.json` — Prometheus query 결과 (SLO + SLO-H-1/H-2 + 보강).
+- `api.log` / `worker.log` — 컨테이너 stdout/stderr (worker.log 는 N 인스턴스 통합).
+- `t_start` / `t_end` — load 단계 시각 마커 (SLI 시계열 범위).
+
+### 9.4 prometheus.yml single target round-robin 한계 (사용자 결정 잠금)
+
+PRD `prd-phase4/04` §R4.18 정정 (2026-05-28) + PLAN `06-m-load-5-horizontal-scaling.md`
+§3.4 보강 정합.
+
+- `docker/prometheus.yml` 의 worker job 이 single static target `worker:3001`.
+- `docker compose up --scale worker=N` (N>=2) 시 docker compose service-level
+  DNS round-robin 으로 매 scrape (15s) 마다 N 인스턴스 중 1 응답 → counter
+  점프 → `rate()` PromQL 의 N 인스턴스 합산 정확도 저하 가능성.
+- 사용자 결정 (2026-05-28 잠금): **prometheus.yml 변경 없이 single target
+  동작 그대로 진행**. 한계는 결과 보고서 (`docs/prd-phase4/results/horizontal-
+  scaling_<date>.md` §5) 에 명시 + 사후 분석.
+- N=1 측정은 본 한계의 영향 없음 (단일 인스턴스, round-robin 없음).
+- 후속 권장 (별도 PRD 또는 fix 시리즈): `dns_sd_configs` 도입 + 정확도 비교.
+
+### 9.5 cgroup 호환성 (호스트 사양 12 core, 32 GB, Docker VM 7.65 GB)
+
+- worker 컨테이너에 cgroup limit **없음** (host CPU/메모리 공유).
+- M-LOAD-1 §5a 보조 관찰 cross-link — 6 서비스 cgroup 총합 (15.0 cpus) 가
+  호스트 코어 (12) over-commit. M-LOAD-5 N=10 측정 시 14 컨테이너 / 12 core
+  over-commit 영역 진입 — 단 부하 영역 (LP-2 normal R=100) 이 N=1 capacity
+  안에 들어와 over-commit 영향 미관찰.
+- M-LOAD-4 LP-3 cross-link — 단일 Redis fork-time 메모리 cliff (Docker VM
+  7.65 GB) 영역에서는 LP-2 normal 부하가 fork 영역 진입 안 함 (waiting 큐
+  ~0 영역).
+
+### 9.6 측정 결과 무효 조건 + 정확도 한계 보고서 단계
+
+상세는 PLAN `06-m-load-5-horizontal-scaling.md` §3.4 + §3.3 (SLO-H-1/H-2 PromQL).
+- 메타데이터 누락 (특히 `worker_count: N` 필수).
+- k6 RPS achieved 가 R=100 의 ±2% (= [98, 102]) 를 벗어남.
+- 카디널리티 가드 위반 (`webhook_relay_*` ≤ 1000).
+- Prometheus target `up=0` 구간이 W_load 안에 존재.
+- 정확도 한계 (§9.4) 는 무효 조건은 **아니며** 보고서에 명시.
