@@ -227,7 +227,23 @@ pnpm test:integration # 통합 (Testcontainers로 실제 Redis 기동)
 
 ## 벤치마크
 
-> _(채울 자리)_ 워커 수에 따른 처리량 변화, 처리 지연 분포(p50/p99)를 수치로 기록.
+4단계 부하 측정 결과 보고서 7건을 단일 HTML 로 모은 페이지가
+[`docs/reports/phase4-load-test.html`](./docs/reports/phase4-load-test.html) 에 있다
+(self-contained · 외부 의존성 0 · 좌측 sticky sidebar 네비). 브라우저로 열면
+보고서별로 이동할 수 있고, 상단에 SLO-1~4 / SLO-H-1/2 / Redis knee point /
+LP-4 회복 시간 요약 카드가 표시된다.
+
+| 측정 | 부하 프로필 | 핵심 결과 |
+|------|-------------|-----------|
+| LP-1 baseline | R=10 RPS · P=1KB · W=5분 | SLO 잠정값 4건 전건 통과, 분산 ±0.52% |
+| LP-2 nominal sustained (4 변형) | R=100 RPS · P=80/15/5 · W=30분 × 4 | normal / S3 / S4 / S5 전건 통과 |
+| LP-3 stress | R=500 RPS · P=64KB · W=30분 | **knee 진입** — Bound = Redis fork-time 메모리 |
+| LP-4 spike | base 100 → 1000 × 30s → base 100 | **회복 시간 33.1초**, T3 트리거 미발화 |
+| 수평 확장 (M-LOAD-5) | N ∈ {1, 2, 5, 10} × LP-2 | SLO-H-1 4 N 위반 (부하 영역 의존) / SLO-H-2 4 N 통과 (+0.24%) |
+| 최종 종합 (M-LOAD-6) | M-LOAD-2~5 통합 분석 | Redis HA / Cluster T1~T5 트리거 명문화 + SLO 재조정 |
+
+원본 보고서의 단일 출처는 `docs/prd-phase4/results/` 의 7개 `.md` 파일이며
+(불변식 I4.10), 본 HTML 은 조회/공유용 사본이다.
 
 ---
 
