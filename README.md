@@ -219,8 +219,9 @@ pnpm test:integration # 통합 (Testcontainers로 실제 Redis 기동)
 장애 복구·동시성 시나리오는 모킹이 아니라 **실제 Redis 컨테이너**로 검증합니다.
 검증 시나리오 목록은 `CLAUDE.md` §5 참조.
 
-현재 상태: **117 tests passed** (UT-1~7 + Redis backoff + IT-R1 + IT-S1~S7 + IT-S1b/S2b/S6b
-+ M-OBS-1 메트릭 라우트 통합 테스트 등). 7개 핵심 시나리오 + 회귀 가드 전건 그린.
+현재 상태: **37 files / 194 tests passed** (UT-1~6 + 보강 + IT-S1~S7 + IT-S1b/S2b/S6b
++ IT-R1 도메인 경계 + IT-OBS-1~12 3단계 메트릭/대시보드/SLO 통합 테스트 + M-LOAD-3
+`receiver-variants` 9 case 등). 7개 핵심 시나리오 + 회귀 가드 전건 그린.
 
 ---
 
