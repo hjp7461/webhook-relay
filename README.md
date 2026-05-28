@@ -248,8 +248,8 @@ pnpm test:integration # 통합 (Testcontainers로 실제 Redis 기동)
         지연/DLQ 적재율) + 10 alert + burn rate (14.4×/6×)
   - [x] **M-OBS-6 Refinement** — 카디널리티 모니터링 (IT-OBS-11 ≤ 1000) + 로그·메트릭
         라벨 정합 (IT-OBS-12)
-- [ ] **4단계 — 부하 테스트 + p50/p99 측정 + 수평 확장 SLO 검증** _(진행 중 — PRD/PLAN
-      정착 + 구현 M-LOAD-2 완료, M-LOAD-3 진행 중)_
+- [ ] **4단계 — 부하 테스트 + p50/p99 측정 + 수평 확장 SLO 검증** _(진행 중 —
+      M-LOAD-4 완료, M-LOAD-5 진입 대기)_
   - [x] **4단계 PRD** — Q-LOAD-1~13 전건 잠금 (`docs/prd-phase4/`)
   - [x] **4단계 PLAN** — C-LOAD-1~15 카탈로그 정착 (`docs/plan-phase4/`)
   - [x] **M-LOAD-1 Bootstrap** — `docker-compose.yml` k6 서비스 + cgroup 한정값
@@ -258,10 +258,19 @@ pnpm test:integration # 통합 (Testcontainers로 실제 Redis 기동)
         + 8 단계 측정 자동화 (`run-lp-1.sh`) + 결과 보고서
         (`docs/prd-phase4/results/LP-1_2026-05-27.md`). SLO 잠정값 전건 통과 +
         분산 ±5% 안.
-  - [ ] M-LOAD-3 LP-2 nominal sustained — LP-2 (R=100 RPS, P=80/15/5, W=~32분) +
-        IT-S3/S4/S5 부하 변형 (stub) + SLO 잠정값 검증 분포 확보
-  - [ ] M-LOAD-4 LP-3 stress + LP-4 spike — knee point 1차 탐색 (R=500 stress /
-        100→1000 spike)
+  - [x] **M-LOAD-3 LP-2 nominal sustained 측정** — LP-2 (R=100 RPS, P=80/15/5,
+        W=~32분) 4 변형 × 8 단계 자동화 (`run-lp-2.sh`) + variant-aware stub
+        (`/_demo/receiver?variant=normal|s3|s4|s5`) + 결과 보고서
+        (`docs/prd-phase4/results/LP-2_2026-05-27.md`). SLO 잠정값 + PLAN §3.3
+        결과 무효 조건 보강 (W3 attempts ≈ 3.0 / SLO-4 DLQ 1.0 / C5
+        non_retriable rate / D3 80/15/5) 전건 통과.
+  - [x] **M-LOAD-4 LP-3 stress + LP-4 spike — knee point 1차 탐색** — LP-3
+        (R=500 stress, P=large 64KB 고정, W=~32분) + LP-4 (base 100 → spike
+        1000 × 30s → base 100) k6 시나리오 + 측정 자동화 (`run-lp-3.sh` /
+        `run-lp-4.sh`) + 결과 보고서 (`docs/prd-phase4/results/LP-3_2026-05-27.md`
+        + `LP-4_2026-05-28.md`). **LP-3 knee 명백 진입 — Bound = 단일 Redis
+        인스턴스의 RDB snapshot fork-time 메모리 한계** (Q-LOAD-4 (a) 정합).
+        LP-4 회복 시간 33.1초 정상 측정 + PRD §6.2 T3 트리거 미발화.
   - [ ] M-LOAD-5 수평 확장 — N ∈ {1, 2, 5, 10} × LP-2 + SLO-H-1 (α=0.8) /
         SLO-H-2 (β=1.2) 검증
   - [ ] M-LOAD-6 Redis knee + 최종 종합 보고서 + `prd-phase3/04` §3.1 SLO 임계
