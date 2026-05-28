@@ -29,10 +29,11 @@ Redis(BullMQ) 기반의 **at-least-once 웹훅 전송 작업 큐**. 외부로의
 | **Domain Schemas** | `packages/demo/src/domain/schemas.ts`, `idempotency-key.ts`, `hmac.ts` | Zod 경계 파싱, 멱등성 키 검증, HMAC-SHA256 결정성 서명 |
 | **Config** | `packages/demo/src/config.ts` | 환경변수 Zod fail-fast 파싱(시크릿 ≥ 32 bytes) |
 | **Receiver Store** | `packages/demo/src/receiver/store.ts` | 데모 수신자의 최근 N건 in-memory FIFO |
-| **Service Mode** | `packages/demo/src/server.ts` `main()` | `SERVICE_MODE` env (`all` / `api` / `worker`)로 프로세스 모드 분기. `all` = 단일 프로세스(데모 기본값, IT-S7 자식 호환), `api` = Fastify 만, `worker` = BullMQ Worker 만. 동일 이미지를 `docker compose up --scale worker=N` 으로 수평 확장 |
+| **Service Mode** | `packages/demo/src/server.ts` `main()` | `SERVICE_MODE` env (`all` / `api` / `worker`)로 프로세스 모드 분기. `all` = 단일 프로세스(데모 기본값, IT-S7 자식 호환), `api` = Fastify 만, `worker` = BullMQ Worker 만. 동일 이미지를 `docker compose up --scale worker=N` 으로 수평 확장. N 매트릭스 측정 결과 = `docs/prd-phase4/results/horizontal-scaling_2026-05-28.md` (M-LOAD-5, SLO-H-1 4 N 위반 / SLO-H-2 4 N 통과) |
 | **Metrics Endpoint** | `packages/demo/src/api/metrics.ts`, `packages/core/src/metrics.ts` | `GET /metrics` Prometheus 텍스트 응답 (api 모드 3000 / worker 모드 `WORKER_METRICS_PORT=3001`). 도메인 무관 메트릭은 `core/metrics.ts` 에 정의(C1~C11), 도메인 메트릭은 `demo/src/metrics.ts` 에 정의(D1~D3 / W1~W4). 셧다운 진행 중에도 200 유지(Q-OBS-2 (a)) |
 | **Prometheus** | `docker/prometheus.yml`, `docker/prometheus/rules/` | scrape target = `webhook-relay-api` / `webhook-relay-worker`. rule_files glob 으로 SLO/플랫폼 알람 4 group 로드. `docker compose up` 후 `http://localhost:9090` |
-| **Grafana** | `docker/grafana/{dashboards,provisioning}/` | provisioning 으로 datasource(Prometheus) + 대시보드 4종(overview / reliability / dlq / shutdown) 자동 import. `editable: false` / `allowUiUpdates: false` 로 JSON PR 워크플로우 강제. `http://localhost:3002` (데모 기본 admin/admin — worker `/metrics` 호스트 포트 3001 사용으로 3002 로 이동, 2026-05-27 결정) |
+| **Grafana** | `docker/grafana/{dashboards,provisioning}/` | provisioning 으로 datasource(Prometheus) + 대시보드 4종(overview / reliability / dlq / shutdown) 자동 import. `editable: false` / `allowUiUpdates: false` 로 JSON PR 워크플로우 강제. `http://localhost:3002` (데모 기본 admin/admin). 2026-05-28 fix `db23169` 로 worker `/metrics` 호스트 포트 매핑 제거 — Prometheus 가 컨테이너 네트워크 `worker:3001` 에서 scrape. Grafana 의 호스트 포트 3002 는 2026-05-27 결정의 result. |
+| **k6 (부하 측정 도구)** | `docker/k6/scenarios/`, `docker/k6/scripts/` | 4단계 부하 측정. `profiles: ["measure"]` 로 분리 (`docker compose --profile measure run --rm k6 ...`). 5 시나리오 (lp-1~lp-4 + horizontal-scaling) + variant-aware stub (M-LOAD-3) + 메타데이터 헬퍼. raw artifact = `docker/k6/results/` (gitignore), Markdown 결과 보고서 = `docs/prd-phase4/results/` (불변식 I4.10). Q-LOAD-1 (a) k6 + Q-LOAD-12 (a) Markdown 정합 |
 
 ### 패키지 경계 (CLAUDE.md §3)
 
@@ -217,12 +218,17 @@ SIGTERM ──► handleSignal()
 - ✅ **그레이스풀 셧다운** — SIGTERM 시 진행 작업 완료 + 신규 요청 503(I2.6, I6.3).
 - ✅ **시크릿 fail-fast** — `API_BEARER_TOKEN`, `WEBHOOK_HMAC_SECRET` ≥ 32 bytes, 부트스트랩에서 거부.
 - ✅ **Prometheus/Grafana 관측성** — `GET /metrics` 가 C1~C11(도메인 무관) + D1~D3/W1~W4(도메인) 전건 노출. Grafana 4 대시보드(overview/reliability/dlq/shutdown) 자동 provisioning. 셧다운 진행 중에도 `/metrics` 200 유지(Q-OBS-2 (a), IT-OBS-9). 카디널리티 메트릭당 ≤ 1000(IT-OBS-11).
-- ✅ **SLO + 알람 규칙(잠정값)** — Prometheus rule YAML 4종 + alert 10종을 `docker/prometheus/rules/` 가 보존한다.
-  - **SLO-1 가용성:** `POST /webhooks` 5xx 비율 ≤ 0.5%(28일). burn rate 14.4×/6× page/ticket.
-  - **SLO-2 등록 지연:** `POST /webhooks` p99 ≤ 0.5s(7일).
-  - **SLO-3 전달 지연:** 워커 success 처리 p99 ≤ 5s(7일).
-  - **SLO-4 DLQ 적재율:** `DLQ jobs / processed jobs` ≤ 1%(1h 윈도우, 30m sustained).
-  - 임계 숫자는 잠정값이며 4단계 실측 후 재조정 가능(Q-OBS-11). SLI PromQL 형태와 측정 윈도우는 잠금(I6.1). 알람 라우팅(Alertmanager/Slack/PagerDuty)은 본 시스템 범위 밖(`prd-phase3/05` §1.3).
+- ✅ **SLO + 알람 규칙 (4단계 실측 기반 갱신 2026-05-28)** — Prometheus rule YAML 4종 + alert 10종을 `docker/prometheus/rules/` 가 보존한다. 임계 숫자는 `docs/prd-phase4/results/final_2026-05-28.md` §4.2 의 실측 기반 갱신값 (Q-OBS-11 closed, Q-LOAD-9 (a) p99 × 1.5).
+  - **SLO-1 가용성:** `POST /webhooks` 5xx 비율 ≤ 0.5%(28일). burn rate 14.4×/6× page/ticket. 실측 0 → `prd-phase4/03` §4.5 변형으로 잠정값 유지.
+  - **SLO-2 등록 지연:** `POST /webhooks` p99 ≤ 7.5ms(7일). 실측 nominal max 4.99ms × 1.5.
+  - **SLO-3 전달 지연:** 워커 success 처리 p99 ≤ 14.9ms(7일). 실측 nominal max 9.96ms × 1.5.
+  - **SLO-4 DLQ 적재율:** `DLQ jobs / processed jobs` ≤ 1%(1h 윈도우, 30m sustained). 실측 0 → `prd-phase4/03` §4.5 변형으로 잠정값 유지.
+  - SLI PromQL 형태와 측정 윈도우 (28d/7d/1d) + burn rate 표준값 (14.4×/6×) 은 잠금 (I6.1 / I6.2). 알람 라우팅(Alertmanager/Slack/PagerDuty)은 본 시스템 범위 밖(`prd-phase3/05` §1.3).
+- ✅ **수평 확장 SLO (SLO-H-1 / SLO-H-2) — 4단계 실측 기반 1차 검증** — `docs/prd-phase4/04` 가 새로 정의한 상대 SLO 의 본 시스템 측정 결과 (M-LOAD-5, `docs/prd-phase4/results/horizontal-scaling_2026-05-28.md`).
+  - **SLO-H-1 (처리량 선형성, α=0.8):** N ∈ {1,2,5,10} × LP-2 nominal (R=100) 측정에서 4 N 모두 위반 (linearity = 1/N). 위반 사유 = **부하 영역 의존성 (capacity 미달, PRD §I4.22)** — nominal 부하가 N=1 워커 capacity 안에 들어와 추가 워커 idle. 자원 경합 / Redis 포화 / cgroup 과소 모두 아님. capacity 초과 영역의 N 매트릭스 측정이 SLO-H-1 의 실효 검증 영역 (후속 PRD).
+  - **SLO-H-2 (p99 안정성, β=1.2):** 4 N 모두 통과 (max ratio +0.24%). **본 시스템의 수평 확장 능력에 대한 정량적 약속의 1차 증거**. N=10 cgroup over-commit 영역 (14 컨테이너 / 12 core) 도 p99 안정.
+  - SLI PromQL 은 3단계 메트릭 카탈로그를 그대로 사용 — 새 메트릭 도입 0건 (I4.23).
+- ✅ **부하 측정 + Redis knee point + HA / Cluster 트리거 (4단계 PRD)** — k6 (Q-LOAD-1 (a)) + Prometheus + cgroup 격리 (Q-LOAD-2 (b)) 로 LP-1/2/3/4 + 수평 확장 N 매트릭스 측정 (M-LOAD-1~6). **Redis 단일 인스턴스 knee point** = ~500 RPS @ P=64KB 영역의 RDB snapshot fork-time 메모리 (Docker VM 7.65GB 한계, Q-LOAD-4 (a) 정합). **HA / Cluster 트리거 T1~T5** 명문화 (T2 메모리 포화가 최우선, `docs/prd-phase4/results/final_2026-05-28.md` §3.1). HA / Cluster 도입 자체는 별도 운영 PRD.
 
 ### 보장하지 않는다 (본 PRD 범위 밖)
 - ❌ **exactly-once 전달** — 환상에 가깝다. 멱등성으로 수신자가 흡수.
@@ -237,7 +243,6 @@ SIGTERM ──► handleSignal()
   보수적으로 `stalled-loss-recovered` 메시지로 DLQ 에 적재한다. 분류는 Retriable.
   concurrency>1 의 ambiguous 케이스에서는 중복 적재(< 손실) 트레이드오프.
   `packages/core/src/worker.ts::collectStalledLossCandidates`.
-- ❌ **부하 측정, p50/p99, 수평 확장 SLO** — 4단계 PRD.
 - ❌ **알람 외부 라우팅(Alertmanager/Slack/PagerDuty/Email)** — 본 시스템은 alerting rule YAML 까지만 잠근다. 운영 라우팅은 별도 운영 PRD.
 
 ---
